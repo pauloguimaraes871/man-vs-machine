@@ -1,0 +1,52 @@
+\begin{table}[h]
+\captionsetup{
+  justification=raggedright,
+  labelsep=none,
+  singlelinecheck=false,
+  labelformat=boldlabel,
+}
+\renewcommand{\arraystretch}{1.25}
+\caption[Table 6: \footnotesize ]{\footnotesize \textbf{: Man-and-machine combination frontier.} Each row combines one ML Ensemble portfolio with one human-manager benchmark, rebalanced monthly to constant weights $w$ in the ML portfolio and $1-w$ in the manager, over a grid $w \in \{0, 0.05, \ldots, 1\}$. Because the two-asset weight space is one-dimensional, the frontier is traced with a deterministic grid rather than random draws. Sharpe ratios are annualized and computed on returns in excess of the CDI; Information Ratios are annualized and computed on returns active against IBOV. For each metric the table reports the pure-manager value ($w = 0$), the pure-ML value ($w = 1$), the best value attained on the grid, and the weight $w^{*}$ that attains it. An interior $w^{*}$ indicates a diversification gain from combining machine and human portfolios. Four manager archetypes are considered: a portfolio diversified across all eligible funds (FUNDS\_MEAN) or across top-quartile funds (FUNDS\_Q75), and a single fund drawn either from the eligible universe (MED\_FUND) or from the top quartile (MED\_FUND\_Q75). For the single-fund rows, metrics are computed for the combination with each fund individually and the median across funds is reported; averaging the combined returns across funds would instead collapse exactly to the FUNDS\_MEAN combination. When a fund has closed or has not yet launched, that month is held entirely in the ML portfolio, so each combination is a continuously invested path.}
+\scriptsize
+\setlength{\tabcolsep}{3pt}
+\begin{tabularx}{\linewidth}{>{\raggedright\arraybackslash}m{1.4cm}>{\raggedright\arraybackslash}m{2.4cm}*{8}{>{\raggedleft\arraybackslash}X}}
+\hline
+& & \multicolumn{4}{c}{Sharpe ratio} & \multicolumn{4}{c}{Information ratio} \\
+Portfolio & Manager & Human & ML & Best & $w^{*}$ & Human & ML & Best & $w^{*}$ \\
+\hline
+RP & FUNDS\_MEAN & 0.22 & 0.45 & 0.45 & 100\% & -0.31 & 0.49 & 0.49 & 100\% \\
+RP & FUNDS\_Q75 & 0.48 & 0.45 & 0.48 & 0\% & 0.58 & 0.49 & 0.59 & 20\% \\
+RP & MED\_FUND & 0.24 & 0.45 & 0.45 & 100\% & -0.11 & 0.49 & 0.49 & 100\% \\
+RP & MED\_FUND\_Q75 & 0.38 & 0.45 & 0.45 & 100\% & 0.22 & 0.49 & 0.49 & 100\% \\
+RP\_BOX & FUNDS\_MEAN & 0.22 & 0.44 & 0.44 & 100\% & -0.31 & 0.51 & 0.51 & 100\% \\
+RP\_BOX & FUNDS\_Q75 & 0.48 & 0.44 & 0.48 & 0\% & 0.58 & 0.51 & 0.60 & 30\% \\
+RP\_BOX & MED\_FUND & 0.25 & 0.44 & 0.44 & 100\% & -0.10 & 0.51 & 0.51 & 100\% \\
+RP\_BOX & MED\_FUND\_Q75 & 0.37 & 0.44 & 0.44 & 100\% & 0.22 & 0.51 & 0.51 & 100\% \\
+HRP & FUNDS\_MEAN & 0.22 & 0.39 & 0.39 & 100\% & -0.31 & 0.28 & 0.28 & 100\% \\
+HRP & FUNDS\_Q75 & 0.48 & 0.39 & 0.48 & 0\% & 0.58 & 0.28 & 0.58 & 0\% \\
+HRP & MED\_FUND & 0.23 & 0.39 & 0.39 & 100\% & -0.13 & 0.28 & 0.28 & 100\% \\
+HRP & MED\_FUND\_Q75 & 0.37 & 0.39 & 0.39 & 80\% & 0.19 & 0.28 & 0.28 & 85\% \\
+CS & FUNDS\_MEAN & 0.22 & 0.41 & 0.41 & 100\% & -0.31 & 0.25 & 0.25 & 100\% \\
+CS & FUNDS\_Q75 & 0.48 & 0.41 & 0.48 & 0\% & 0.58 & 0.25 & 0.58 & 0\% \\
+CS & MED\_FUND & 0.22 & 0.41 & 0.41 & 100\% & -0.18 & 0.25 & 0.25 & 100\% \\
+CS & MED\_FUND\_Q75 & 0.37 & 0.41 & 0.41 & 90\% & 0.21 & 0.25 & 0.27 & 70\% \\
+SW & FUNDS\_MEAN & 0.22 & 0.43 & 0.43 & 100\% & -0.31 & 0.26 & 0.26 & 100\% \\
+SW & FUNDS\_Q75 & 0.48 & 0.43 & 0.48 & 0\% & 0.58 & 0.26 & 0.58 & 0\% \\
+SW & MED\_FUND & 0.23 & 0.43 & 0.43 & 100\% & -0.14 & 0.26 & 0.26 & 100\% \\
+SW & MED\_FUND\_Q75 & 0.37 & 0.43 & 0.43 & 100\% & 0.20 & 0.26 & 0.27 & 65\% \\
+EW & FUNDS\_MEAN & 0.22 & 0.43 & 0.43 & 100\% & -0.31 & 0.26 & 0.26 & 100\% \\
+EW & FUNDS\_Q75 & 0.48 & 0.43 & 0.48 & 0\% & 0.58 & 0.26 & 0.58 & 0\% \\
+EW & MED\_FUND & 0.23 & 0.43 & 0.43 & 100\% & -0.14 & 0.26 & 0.26 & 100\% \\
+EW & MED\_FUND\_Q75 & 0.37 & 0.43 & 0.43 & 100\% & 0.19 & 0.26 & 0.27 & 70\% \\
+MVO & FUNDS\_MEAN & 0.22 & 0.42 & 0.42 & 100\% & -0.31 & 0.32 & 0.32 & 100\% \\
+MVO & FUNDS\_Q75 & 0.48 & 0.42 & 0.48 & 0\% & 0.58 & 0.32 & 0.58 & 0\% \\
+MVO & MED\_FUND & 0.23 & 0.42 & 0.42 & 100\% & -0.14 & 0.32 & 0.32 & 100\% \\
+MVO & MED\_FUND\_Q75 & 0.37 & 0.42 & 0.42 & 100\% & 0.20 & 0.32 & 0.33 & 80\% \\
+MVO\_BOX & FUNDS\_MEAN & 0.22 & 0.40 & 0.40 & 100\% & -0.31 & 0.40 & 0.40 & 100\% \\
+MVO\_BOX & FUNDS\_Q75 & 0.48 & 0.40 & 0.48 & 0\% & 0.58 & 0.40 & 0.58 & 5\% \\
+MVO\_BOX & MED\_FUND & 0.22 & 0.40 & 0.40 & 100\% & -0.16 & 0.40 & 0.40 & 100\% \\
+MVO\_BOX & MED\_FUND\_Q75 & 0.37 & 0.40 & 0.40 & 90\% & 0.22 & 0.40 & 0.40 & 95\% \\
+\hline
+\end{tabularx}
+\label{combofront}
+\end{table}

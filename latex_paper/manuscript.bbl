@@ -1,0 +1,596 @@
+\begin{thebibliography}{79}
+\expandafter\ifx\csname natexlab\endcsname\relax\def\natexlab#1{#1}\fi
+\providecommand{\url}[1]{\texttt{#1}}
+\providecommand{\href}[2]{#2}
+\providecommand{\path}[1]{#1}
+\providecommand{\DOIprefix}{doi:}
+\providecommand{\ArXivprefix}{arXiv:}
+\providecommand{\URLprefix}{URL: }
+\providecommand{\Pubmedprefix}{pmid:}
+\providecommand{\doi}[1]{\href{http://dx.doi.org/#1}{\path{#1}}}
+\providecommand{\Pubmed}[1]{\href{pmid:#1}{\path{#1}}}
+\providecommand{\bibinfo}[2]{#2}
+\ifx\xfnm\relax \def\xfnm[#1]{\unskip,\space#1}\fi
+%Type = Article
+\bibitem[{Aghassi et~al.(2023)Aghassi, Asness, Fattouche and
+  Moskowitz}]{aghassiasnessfattouchemoskowitz2023}
+\bibinfo{author}{Aghassi, M.}, \bibinfo{author}{Asness, C.},
+  \bibinfo{author}{Fattouche, C.}, \bibinfo{author}{Moskowitz, T.},
+  \bibinfo{year}{2023}.
+\newblock \bibinfo{title}{Fact, fiction and factor investing}.
+\newblock \bibinfo{journal}{The Journal of Portfolio Management}
+  \bibinfo{volume}{49}, \bibinfo{pages}{1--38}.
+%Type = Article
+\bibitem[{Alzaman(2024)}]{ALZAMAN2024121404}
+\bibinfo{author}{Alzaman, C.}, \bibinfo{year}{2024}.
+\newblock \bibinfo{title}{Deep learning in stock portfolio selection and
+  predictions}.
+\newblock \bibinfo{journal}{Expert Systems with Applications}
+  \bibinfo{volume}{237}, \bibinfo{pages}{121404}.
+\newblock \URLprefix
+  \url{https://www.sciencedirect.com/science/article/pii/S0957417423019061},
+  \DOIprefix\doi{https://doi.org/10.1016/j.eswa.2023.121404}.
+%Type = Article
+\bibitem[{Asness et~al.(2000)Asness, Porter and
+  Stevens}]{asnessporterstevens2000}
+\bibinfo{author}{Asness, C.}, \bibinfo{author}{Porter, B.},
+  \bibinfo{author}{Stevens, R.}, \bibinfo{year}{2000}.
+\newblock \bibinfo{title}{Predicting stock returns using industry-relative firm
+  characteristics}.
+\newblock \bibinfo{journal}{Available at SSRN:
+  https://ssrn.com/abstract=213872} .
+%Type = Book
+\bibitem[{Barra(1997)}]{barra1997}
+\bibinfo{author}{Barra}, \bibinfo{year}{1997}.
+\newblock \bibinfo{title}{Barra market impact model handbook}.
+\newblock \bibinfo{publisher}{Berkeley}.
+%Type = Article
+\bibitem[{Bergmeir et~al.(2018)Bergmeir, Hyndman and Koo}]{bergmeiretal2018}
+\bibinfo{author}{Bergmeir, C.}, \bibinfo{author}{Hyndman, R.},
+  \bibinfo{author}{Koo, B.}, \bibinfo{year}{2018}.
+\newblock \bibinfo{title}{A note on the validity of cross-validation for
+  evaluating autoregressive time series prediction}.
+\newblock \bibinfo{journal}{Computational Statistics \& Data Analysis}
+  \bibinfo{volume}{120}, \bibinfo{pages}{70--83}.
+%Type = Article
+\bibitem[{Bergstra and Bengio(2012)}]{bergstra2012random}
+\bibinfo{author}{Bergstra, J.}, \bibinfo{author}{Bengio, Y.},
+  \bibinfo{year}{2012}.
+\newblock \bibinfo{title}{Random search for hyper-parameter optimization}.
+\newblock \bibinfo{journal}{Journal of Machine Learning Research}
+  \bibinfo{volume}{13}, \bibinfo{pages}{281--305}.
+%Type = Article
+\bibitem[{Blitz et~al.(2023)Blitz, Hanauer, Hoogteijling and
+  Howard}]{blitzetal2023}
+\bibinfo{author}{Blitz, D.}, \bibinfo{author}{Hanauer, M.},
+  \bibinfo{author}{Hoogteijling, T.}, \bibinfo{author}{Howard, C.},
+  \bibinfo{year}{2023}.
+\newblock \bibinfo{title}{The term structure of machine learning alpha}.
+\newblock \bibinfo{journal}{Available at SSRN:
+  https://ssrn.com/abstract=4474637} .
+%Type = Book
+\bibitem[{Bottou and Bousquet(2012)}]{bottoubousquet2012}
+\bibinfo{author}{Bottou, L.}, \bibinfo{author}{Bousquet, O.},
+  \bibinfo{year}{2012}.
+\newblock \bibinfo{title}{The trade-offs of large scale learning}.
+\newblock \bibinfo{publisher}{MIT Press}.
+%Type = Techreport
+\bibitem[{Bouthillier and Varoquaux(2020)}]{bouthilliervaroquaux2020}
+\bibinfo{author}{Bouthillier, X.}, \bibinfo{author}{Varoquaux, G.},
+  \bibinfo{year}{2020}.
+\newblock \bibinfo{title}{Survey of machine-learning experimental methods at
+  NeurIPS2019 and ICLR2020}.
+\newblock \bibinfo{type}{Technical Report}. Inria Saclay Ile de France.
+%Type = Book
+\bibitem[{Breiman(1984)}]{breiman1984}
+\bibinfo{author}{Breiman, L.}, \bibinfo{year}{1984}.
+\newblock \bibinfo{title}{Classification and regression trees}.
+\newblock \bibinfo{publisher}{Routledge}.
+%Type = Article
+\bibitem[{Breiman(2001)}]{breiman2001}
+\bibinfo{author}{Breiman, L.}, \bibinfo{year}{2001}.
+\newblock \bibinfo{title}{Random forests}.
+\newblock \bibinfo{journal}{Machine Learning} \bibinfo{volume}{45},
+  \bibinfo{pages}{5--32}.
+%Type = Article
+\bibitem[{Cattaneo et~al.(2020)Cattaneo, Crump, Farrell and
+  Schaumburg}]{cattaneocrumpfarrellschaumburg2020}
+\bibinfo{author}{Cattaneo, M.}, \bibinfo{author}{Crump, R.},
+  \bibinfo{author}{Farrell, M.}, \bibinfo{author}{Schaumburg, E.},
+  \bibinfo{year}{2020}.
+\newblock \bibinfo{title}{Characteristic-sorted portfolios: Estimation and
+  inference}.
+\newblock \bibinfo{journal}{The Review of Economics and Statistics}
+  \bibinfo{volume}{102}, \bibinfo{pages}{531--551}.
+%Type = Article
+\bibitem[{Cerqueira et~al.(2017)Cerqueira, Torgo, Smailovic and
+  Mozetic}]{cerqueiraetal2017}
+\bibinfo{author}{Cerqueira, V.}, \bibinfo{author}{Torgo, L.},
+  \bibinfo{author}{Smailovic, J.}, \bibinfo{author}{Mozetic, I.},
+  \bibinfo{year}{2017}.
+\newblock \bibinfo{title}{A comparative study of performance estimation methods
+  for time series forecasting}.
+\newblock \bibinfo{journal}{2017 IEEE International Conference on Data Science
+  and Advanced Analytics} .
+%Type = Article
+\bibitem[{Chaves et~al.(2011)Chaves, Hsu, Li and Sharkernia}]{chavesetal2011}
+\bibinfo{author}{Chaves, D.}, \bibinfo{author}{Hsu, J.}, \bibinfo{author}{Li,
+  F.}, \bibinfo{author}{Sharkernia, O.}, \bibinfo{year}{2011}.
+\newblock \bibinfo{title}{Risk parity portfolios vs. other asset allocation
+  heuristic portfolios}.
+\newblock \bibinfo{journal}{The Journal of Investing Spring}
+  \bibinfo{volume}{20}, \bibinfo{pages}{108--118}.
+%Type = Article
+\bibitem[{Chen(2022)}]{chen2022}
+\bibinfo{author}{Chen, A.}, \bibinfo{year}{2022}.
+\newblock \bibinfo{title}{Do t-statistic hurdles need to be raised}.
+\newblock \bibinfo{journal}{arXiv.org} \bibinfo{volume}{2204.10275}.
+%Type = Article
+\bibitem[{Chen and Guestrin(2016)}]{chenguestrin2016}
+\bibinfo{author}{Chen, T.}, \bibinfo{author}{Guestrin, C.},
+  \bibinfo{year}{2016}.
+\newblock \bibinfo{title}{Xgboost: A scalable tree boosting system}.
+\newblock \bibinfo{journal}{Proceedings of the 22nd ACM SIGKDD International
+  conference on knowledge discovery and data mining} ,
+  \bibinfo{pages}{785--794}.
+%Type = Article
+\bibitem[{Chordia et~al.(2020)Chordia, Goyal and
+  Saretto}]{chordiagoyalsaretto2020}
+\bibinfo{author}{Chordia, T.}, \bibinfo{author}{Goyal, A.},
+  \bibinfo{author}{Saretto, A.}, \bibinfo{year}{2020}.
+\newblock \bibinfo{title}{Anomalies and false rejections}.
+\newblock \bibinfo{journal}{The Review of Financial Studies}
+  \bibinfo{volume}{33}, \bibinfo{pages}{2134--2179}.
+%Type = Article
+\bibitem[{Cochrane(2011)}]{cochrane2011}
+\bibinfo{author}{Cochrane, J.}, \bibinfo{year}{2011}.
+\newblock \bibinfo{title}{Discount rates}.
+\newblock \bibinfo{journal}{NBER Working Papers} \bibinfo{volume}{16972}.
+%Type = Book
+\bibitem[{Coqueret and Guida(2020)}]{coqueretguida2020}
+\bibinfo{author}{Coqueret, G.}, \bibinfo{author}{Guida, T.},
+  \bibinfo{year}{2020}.
+\newblock \bibinfo{title}{Machine learning for factor investing: R version}.
+\newblock \bibinfo{publisher}{Chapman \& Hall}.
+%Type = Article
+\bibitem[{Coqueret and Milhau(2014)}]{coqueretmilhau2014}
+\bibinfo{author}{Coqueret, G.}, \bibinfo{author}{Milhau, V.},
+  \bibinfo{year}{2014}.
+\newblock \bibinfo{title}{Estimating covariance matrices for portfolio
+  optimization}.
+\newblock \bibinfo{journal}{ERI Scientific Beta White Paper} .
+%Type = Article
+\bibitem[{Costarelli et~al.(2016)Costarelli, Spigler and
+  Vinti}]{costarellispiglervinti2016}
+\bibinfo{author}{Costarelli, D.}, \bibinfo{author}{Spigler, R.},
+  \bibinfo{author}{Vinti, G.}, \bibinfo{year}{2016}.
+\newblock \bibinfo{title}{A survey on approximation by means of neural network
+  operators}.
+\newblock \bibinfo{journal}{Journal of NeuroTechnology} ,
+  \bibinfo{pages}{1--24}.
+%Type = Article
+\bibitem[{Dai et~al.(2024)Dai, Lai, Huang, Lv and Zaidi}]{DAI2024124565}
+\bibinfo{author}{Dai, H.L.}, \bibinfo{author}{Lai, F.T.},
+  \bibinfo{author}{Huang, C.Y.}, \bibinfo{author}{Lv, X.T.},
+  \bibinfo{author}{Zaidi, F.S.}, \bibinfo{year}{2024}.
+\newblock \bibinfo{title}{Novel online portfolio selection algorithm using deep
+  sequence features and reversal information}.
+\newblock \bibinfo{journal}{Expert Systems with Applications}
+  \bibinfo{volume}{255}, \bibinfo{pages}{124565}.
+\newblock \URLprefix
+  \url{https://www.sciencedirect.com/science/article/pii/S0957417424014325},
+  \DOIprefix\doi{https://doi.org/10.1016/j.eswa.2024.124565}.
+%Type = Book
+\bibitem[{De~Prado(2018)}]{deprado2018}
+\bibinfo{author}{De~Prado, M.L.}, \bibinfo{year}{2018}.
+\newblock \bibinfo{title}{Advances in financial machine learning}.
+\newblock \bibinfo{publisher}{John Wiley \& Sons}.
+%Type = Misc
+\bibitem[{Diasio et~al.(2023)Diasio, Barrington and Kapoor}]{diasioetal2023}
+\bibinfo{author}{Diasio, D.}, \bibinfo{author}{Barrington, M.},
+  \bibinfo{author}{Kapoor, S.}, \bibinfo{year}{2023}.
+\newblock \bibinfo{title}{Ai anxiety in business survey}.
+\newblock
+  \bibinfo{howpublished}{\url{https://www.ey.com/en_us/consulting/businesses-can-stop-rising-ai-use-from-fueling-anxiety}}.
+%Type = Article
+\bibitem[{Dietterich(2000)}]{dietterich2000}
+\bibinfo{author}{Dietterich, T.}, \bibinfo{year}{2000}.
+\newblock \bibinfo{title}{Ensemble methods in machine learning}.
+\newblock \bibinfo{journal}{International workshop on multiple classifier
+  systems} , \bibinfo{pages}{1--15}.
+%Type = Article
+\bibitem[{Du(2022)}]{DU2022117005}
+\bibinfo{author}{Du, J.}, \bibinfo{year}{2022}.
+\newblock \bibinfo{title}{Mean–variance portfolio optimization with deep
+  learning based-forecasts for cointegrated stocks}.
+\newblock \bibinfo{journal}{Expert Systems with Applications}
+  \bibinfo{volume}{201}, \bibinfo{pages}{117005}.
+\newblock \URLprefix
+  \url{https://www.sciencedirect.com/science/article/pii/S0957417422004237},
+  \DOIprefix\doi{https://doi.org/10.1016/j.eswa.2022.117005}.
+%Type = Article
+\bibitem[{Eldan and Shamir(2016)}]{eldanshamir2016}
+\bibinfo{author}{Eldan, R.}, \bibinfo{author}{Shamir, O.},
+  \bibinfo{year}{2016}.
+\newblock \bibinfo{title}{The power of depth for feedforward neural networks}.
+\newblock \bibinfo{journal}{29th Annual Conference on Learning Theory}
+  \bibinfo{volume}{49}, \bibinfo{pages}{907--940}.
+%Type = Article
+\bibitem[{Fama(1970)}]{fama1970}
+\bibinfo{author}{Fama, E.}, \bibinfo{year}{1970}.
+\newblock \bibinfo{title}{Efficient capital markets: A review of theory and
+  empirical work}.
+\newblock \bibinfo{journal}{The Journal of Finance} \bibinfo{volume}{25},
+  \bibinfo{pages}{383--417}.
+%Type = Article
+\bibitem[{Feng and Lu(2019)}]{fenglu2019}
+\bibinfo{author}{Feng, J.}, \bibinfo{author}{Lu, S.}, \bibinfo{year}{2019}.
+\newblock \bibinfo{title}{Performance analysis of various activation functions
+  in artificial neural networks}.
+\newblock \bibinfo{journal}{Journal of Physics: Conf. Ser.} ,
+  \bibinfo{pages}{1237 022030}.
+%Type = Article
+\bibitem[{Freyberger et~al.(2020)Freyberger, Neuhierl and
+  Weber}]{freybergerneuhierlweber2020}
+\bibinfo{author}{Freyberger, J.}, \bibinfo{author}{Neuhierl, A.},
+  \bibinfo{author}{Weber, M.}, \bibinfo{year}{2020}.
+\newblock \bibinfo{title}{Dissecting characteristics nonparametrically}.
+\newblock \bibinfo{journal}{The Review of Financial Studies}
+  \bibinfo{volume}{33}.
+%Type = Article
+\bibitem[{Friedman(2001)}]{friedman2001}
+\bibinfo{author}{Friedman, J.}, \bibinfo{year}{2001}.
+\newblock \bibinfo{title}{Greedy function approximation: a gradient boosting
+  machine}.
+\newblock \bibinfo{journal}{Annals of Statistics} ,
+  \bibinfo{pages}{1189--1232}.
+%Type = Book
+\bibitem[{Gareth(2013)}]{jamesetal2013}
+\bibinfo{author}{Gareth, J.e.a.}, \bibinfo{year}{2013}.
+\newblock \bibinfo{title}{An introduction to statistical learning}.
+\newblock \bibinfo{publisher}{Springer}.
+%Type = Article
+\bibitem[{Geisser(1975)}]{geisser1975}
+\bibinfo{author}{Geisser, S.}, \bibinfo{year}{1975}.
+\newblock \bibinfo{title}{The predictive sample reuse method with
+  applications}.
+\newblock \bibinfo{journal}{Journal of the American Statistical Association}
+  \bibinfo{volume}{70}, \bibinfo{pages}{320--328}.
+%Type = Book
+\bibitem[{Ghayur et~al.(2019)Ghayur, Heaney and Platt}]{ghayurheaneyplatt2019}
+\bibinfo{author}{Ghayur, K.}, \bibinfo{author}{Heaney, R.},
+  \bibinfo{author}{Platt, S.}, \bibinfo{year}{2019}.
+\newblock \bibinfo{title}{Equity smart beta and factor investing for
+  practitioners}.
+\newblock \bibinfo{publisher}{John Wiley \& Sons}.
+%Type = Article
+\bibitem[{Glorot and Bengio(2014)}]{srivastavaetal2014}
+\bibinfo{author}{Glorot, X.}, \bibinfo{author}{Bengio, Y.},
+  \bibinfo{year}{2014}.
+\newblock \bibinfo{title}{Dropout: a simple way to prevent neural networks from
+  overfitting}.
+\newblock \bibinfo{journal}{Journal of Machine Learning Research}
+  \bibinfo{volume}{15}.
+%Type = Book
+\bibitem[{Goodfellow et~al.(2016)Goodfellow, Bengio and
+  Courville}]{Goodfellow-et-al-2016}
+\bibinfo{author}{Goodfellow, I.}, \bibinfo{author}{Bengio, Y.},
+  \bibinfo{author}{Courville, A.}, \bibinfo{year}{2016}.
+\newblock \bibinfo{title}{Deep Learning}.
+\newblock \bibinfo{publisher}{MIT Press}.
+\newblock \bibinfo{note}{\url{http://www.deeplearningbook.org}}.
+%Type = Article
+\bibitem[{Goyal(2012)}]{goyal2012}
+\bibinfo{author}{Goyal, A.}, \bibinfo{year}{2012}.
+\newblock \bibinfo{title}{Empirical cross-sectional asset pricing: A survey}.
+\newblock \bibinfo{journal}{Financial Markets and Portfolio Management}
+  \bibinfo{volume}{26}, \bibinfo{pages}{3--38}.
+%Type = Article
+\bibitem[{Green et~al.(2013)Green, Hand and Zhang}]{greenhandzhang2013}
+\bibinfo{author}{Green, J.}, \bibinfo{author}{Hand, J.},
+  \bibinfo{author}{Zhang, X.F.}, \bibinfo{year}{2013}.
+\newblock \bibinfo{title}{The supraview of return predictive signals}.
+\newblock \bibinfo{journal}{Review of Accounting Studies} \bibinfo{volume}{18},
+  \bibinfo{pages}{692--730}.
+%Type = Article
+\bibitem[{Gu et~al.(2020)Gu, Kelly and Dacheng}]{gukellyxiu2020}
+\bibinfo{author}{Gu, S.}, \bibinfo{author}{Kelly, B.},
+  \bibinfo{author}{Dacheng, X.}, \bibinfo{year}{2020}.
+\newblock \bibinfo{title}{Empirical asset pricing via machine learning}.
+\newblock \bibinfo{journal}{The Review of Financial Studies}
+  \bibinfo{volume}{33}, \bibinfo{pages}{2223--2273}.
+%Type = Article
+\bibitem[{Hanauer and Kalsbach(2023)}]{hanauerkalsbach2023}
+\bibinfo{author}{Hanauer, M.}, \bibinfo{author}{Kalsbach, T.},
+  \bibinfo{year}{2023}.
+\newblock \bibinfo{title}{Machine learning and the cross-section of emerging
+  market stock returns}.
+\newblock \bibinfo{journal}{Emerging Markets Review} \bibinfo{volume}{55}.
+%Type = Article
+\bibitem[{Harvey and Liu(2019)}]{harveyliu2019}
+\bibinfo{author}{Harvey, C.}, \bibinfo{author}{Liu, Y.}, \bibinfo{year}{2019}.
+\newblock \bibinfo{title}{A census of the factor zoo}.
+\newblock \bibinfo{journal}{Available at SSRN:
+  https://ssrn.com/abstract=3341728} .
+%Type = Article
+\bibitem[{Harvey et~al.(2016)Harvey, Liu and Zhu}]{harveyliuzhu2016}
+\bibinfo{author}{Harvey, C.}, \bibinfo{author}{Liu, Y.}, \bibinfo{author}{Zhu,
+  H.}, \bibinfo{year}{2016}.
+\newblock \bibinfo{title}{...and the cross-section of expected returns}.
+\newblock \bibinfo{journal}{The Review of Financial Studies}
+  \bibinfo{volume}{29}, \bibinfo{pages}{5--68}.
+%Type = Article
+\bibitem[{Hou et~al.(2017)Hou, Xue and Zhang}]{houxuezhang2017}
+\bibinfo{author}{Hou, K.}, \bibinfo{author}{Xue, C.}, \bibinfo{author}{Zhang,
+  L.}, \bibinfo{year}{2017}.
+\newblock \bibinfo{title}{Replicating anomalies}.
+\newblock \bibinfo{journal}{NBER Working Papers} \bibinfo{volume}{23394}.
+%Type = Article
+\bibitem[{Hsu et~al.(2022)Hsu, Liu, Viswanathan and Xia}]{hsuetal2022}
+\bibinfo{author}{Hsu, J.}, \bibinfo{author}{Liu, X.},
+  \bibinfo{author}{Viswanathan, V.}, \bibinfo{author}{Xia, Y.},
+  \bibinfo{year}{2022}.
+\newblock \bibinfo{title}{When smart beta meets machine learning and portfolio
+  optimization}.
+\newblock \bibinfo{journal}{Journal of Beta Investment Strategies}
+  \bibinfo{volume}{8}.
+%Type = Article
+\bibitem[{Ioffe and Szegedy(2015)}]{ioffeszegedy2015}
+\bibinfo{author}{Ioffe, S.}, \bibinfo{author}{Szegedy, C.},
+  \bibinfo{year}{2015}.
+\newblock \bibinfo{title}{Batch normalization: Accelerating deep network
+  training by reducing internal covariate shift}.
+\newblock \bibinfo{journal}{arXiv} \bibinfo{volume}{(1502.03167)}.
+%Type = Article
+\bibitem[{Ishwaran et~al.(2014)Ishwaran, Gerds, Kogalur and
+  Moore}]{ishwaran2014}
+\bibinfo{author}{Ishwaran, H.}, \bibinfo{author}{Gerds, T.},
+  \bibinfo{author}{Kogalur, U.}, \bibinfo{author}{Moore, R.},
+  \bibinfo{year}{2014}.
+\newblock \bibinfo{title}{Random survival forests for competing risks}.
+\newblock \bibinfo{journal}{Biostatistics} \bibinfo{volume}{15},
+  \bibinfo{pages}{757--773}.
+%Type = Article
+\bibitem[{Jacobs and Müller(2020)}]{jacobsmuller2020}
+\bibinfo{author}{Jacobs, H.}, \bibinfo{author}{Müller, S.},
+  \bibinfo{year}{2020}.
+\newblock \bibinfo{title}{Anomalies across the globe: Once public, no longer
+  existent?}
+\newblock \bibinfo{journal}{Journal of Financial Economics}
+  \bibinfo{volume}{135}, \bibinfo{pages}{213--230}.
+%Type = Article
+\bibitem[{Jensen et~al.(2023)Jensen, Kelly and
+  Pedersen}]{jensenkellypedersen2023}
+\bibinfo{author}{Jensen, T.}, \bibinfo{author}{Kelly, B.},
+  \bibinfo{author}{Pedersen, L.}, \bibinfo{year}{2023}.
+\newblock \bibinfo{title}{Is there a replication crisis in finance?}
+\newblock \bibinfo{journal}{The Journal of Finance} \bibinfo{volume}{78},
+  \bibinfo{pages}{2465--2518}.
+%Type = Article
+\bibitem[{Jokanovic and Poitras(2001)}]{poitrasjovanovic2001}
+\bibinfo{author}{Jokanovic, F.}, \bibinfo{author}{Poitras, G.},
+  \bibinfo{year}{2001}.
+\newblock \bibinfo{title}{Does god practive a random walk? the "financial
+  physics" of a 19th century forerunner, jules regnault}.
+\newblock \bibinfo{journal}{European Journal of the History of Economic
+  Thought} \bibinfo{volume}{8}, \bibinfo{pages}{332--362}.
+%Type = Article
+\bibitem[{Karolyi(2016)}]{karolyi2016}
+\bibinfo{author}{Karolyi, A.}, \bibinfo{year}{2016}.
+\newblock \bibinfo{title}{Home bias, an academic puzzle}.
+\newblock \bibinfo{journal}{Review of Finance} \bibinfo{volume}{20},
+  \bibinfo{pages}{2049--2078}.
+%Type = Article
+\bibitem[{Kelly et~al.(2022)Kelly, Malamud and Zhou}]{kellymalamudzhou2022}
+\bibinfo{author}{Kelly, B.}, \bibinfo{author}{Malamud, S.},
+  \bibinfo{author}{Zhou, K.}, \bibinfo{year}{2022}.
+\newblock \bibinfo{title}{The virtue of complexity in return prediction}.
+\newblock \bibinfo{journal}{NBER Working Papers} \bibinfo{volume}{20217}.
+%Type = Article
+\bibitem[{Kelly and Xiu(2023)}]{kellyxiu2023}
+\bibinfo{author}{Kelly, B.}, \bibinfo{author}{Xiu, D.}, \bibinfo{year}{2023}.
+\newblock \bibinfo{title}{Financial machine learning}.
+\newblock \bibinfo{journal}{Available at SSRN:
+  https://ssrn.com/abstract=4501707} .
+%Type = Article
+\bibitem[{Kingma and Ba(2014)}]{kingmaba2014}
+\bibinfo{author}{Kingma, D.}, \bibinfo{author}{Ba, J.}, \bibinfo{year}{2014}.
+\newblock \bibinfo{title}{Adam: A method for stochastic optimization}.
+\newblock \bibinfo{journal}{arXiv} \bibinfo{volume}{1412.6980}.
+%Type = Article
+\bibitem[{Kuncheva and Whitaker(2003)}]{kunchevawhitaker2003}
+\bibinfo{author}{Kuncheva, L.}, \bibinfo{author}{Whitaker, C.},
+  \bibinfo{year}{2003}.
+\newblock \bibinfo{title}{Measures of diversity in classifier ensembles}.
+\newblock \bibinfo{journal}{Machine Learning} , \bibinfo{pages}{181--207}.
+%Type = Article
+\bibitem[{LaValle et~al.(2004)LaValle, Branicky and
+  Lindemann}]{lavalle2004relationship}
+\bibinfo{author}{LaValle, S.M.}, \bibinfo{author}{Branicky, M.S.},
+  \bibinfo{author}{Lindemann, S.R.}, \bibinfo{year}{2004}.
+\newblock \bibinfo{title}{On the relationship between classical grid search and
+  probabilistic roadmaps}.
+\newblock \bibinfo{journal}{The International Journal of Robotics Research}
+  \bibinfo{volume}{23}, \bibinfo{pages}{673--692}.
+%Type = Article
+\bibitem[{Ledoit and Wolf(2003)}]{ledoitwolf2003}
+\bibinfo{author}{Ledoit, O.}, \bibinfo{author}{Wolf, M.}, \bibinfo{year}{2003}.
+\newblock \bibinfo{title}{Improved estimation of the covariance matrix of stock
+  returns with an application to portfolio selection}.
+\newblock \bibinfo{journal}{Journal of Empirical Finance} \bibinfo{volume}{10},
+  \bibinfo{pages}{603--621}.
+%Type = Article
+\bibitem[{Ledoit and Wolf(2004)}]{ledoitwolf2004}
+\bibinfo{author}{Ledoit, O.}, \bibinfo{author}{Wolf, M.}, \bibinfo{year}{2004}.
+\newblock \bibinfo{title}{A well-conditioned estimator for large-dimensional
+  covariance matrices}.
+\newblock \bibinfo{journal}{Journal of Multivariate Analysis}
+  \bibinfo{volume}{88}, \bibinfo{pages}{365--411}.
+%Type = Article
+\bibitem[{Ledoit and Wolf(2022)}]{ledoitwolf2020}
+\bibinfo{author}{Ledoit, O.}, \bibinfo{author}{Wolf, M.}, \bibinfo{year}{2022}.
+\newblock \bibinfo{title}{The power of (non-)linear shrinking: A review and
+  guide to covariance matrix estimation}.
+\newblock \bibinfo{journal}{Journal of Financial Econometrics}
+  \bibinfo{volume}{20}, \bibinfo{pages}{187--218}.
+%Type = Article
+\bibitem[{Lee(2020)}]{lee2020}
+\bibinfo{author}{Lee, S.}, \bibinfo{year}{2020}.
+\newblock \bibinfo{title}{Hyperparameter optimization for forecasting stock
+  returns}.
+\newblock \bibinfo{journal}{arXiv Preprint} \bibinfo{volume}{(2001.10278)}.
+%Type = Article
+\bibitem[{Lewellen(2015)}]{lewellen2015}
+\bibinfo{author}{Lewellen, J.}, \bibinfo{year}{2015}.
+\newblock \bibinfo{title}{The cross-section of expected stock returns}.
+\newblock \bibinfo{journal}{Critical Finance Review} \bibinfo{volume}{4},
+  \bibinfo{pages}{1--44}.
+%Type = Article
+\bibitem[{Li and Huang(2020)}]{lihuang2020}
+\bibinfo{author}{Li, J.}, \bibinfo{author}{Huang, J.S.}, \bibinfo{year}{2020}.
+\newblock \bibinfo{title}{Dimensions of artificial intelligence based on the
+  integrated fear acquisition theory}.
+\newblock \bibinfo{journal}{Technology in Society} \bibinfo{volume}{63},
+  \bibinfo{pages}{101410}.
+%Type = Article
+\bibitem[{Linnainmaa and Roberts(2018)}]{linnainmaaroberts2018}
+\bibinfo{author}{Linnainmaa, J.}, \bibinfo{author}{Roberts, M.},
+  \bibinfo{year}{2018}.
+\newblock \bibinfo{title}{The history of the cross-section of stock returns}.
+\newblock \bibinfo{journal}{The Review of Financial Studies}
+  \bibinfo{volume}{31}, \bibinfo{pages}{2606--2649}.
+%Type = Article
+\bibitem[{Ma et~al.(2021)Ma, Han and Wang}]{MA2021113973}
+\bibinfo{author}{Ma, Y.}, \bibinfo{author}{Han, R.}, \bibinfo{author}{Wang,
+  W.}, \bibinfo{year}{2021}.
+\newblock \bibinfo{title}{Portfolio optimization with return prediction using
+  deep learning and machine learning}.
+\newblock \bibinfo{journal}{Expert Systems with Applications}
+  \bibinfo{volume}{165}, \bibinfo{pages}{113973}.
+\newblock \URLprefix
+  \url{https://www.sciencedirect.com/science/article/pii/S0957417420307521},
+  \DOIprefix\doi{https://doi.org/10.1016/j.eswa.2020.113973}.
+%Type = Article
+\bibitem[{Maiti(2019)}]{maiti2019}
+\bibinfo{author}{Maiti, M.}, \bibinfo{year}{2019}.
+\newblock \bibinfo{title}{A critical review on evolution of risk factors and
+  factor models}.
+\newblock \bibinfo{journal}{Journal of Economic Surveys} \bibinfo{volume}{34},
+  \bibinfo{pages}{175--184}.
+%Type = Article
+\bibitem[{Masters(1993)}]{masters1993}
+\bibinfo{author}{Masters, T.}, \bibinfo{year}{1993}.
+\newblock \bibinfo{title}{Practical neural network recipes in {C}{+}{+}}.
+\newblock \bibinfo{journal}{Academic Press} .
+%Type = Article
+\bibitem[{McLean and Pontiff(2016)}]{mcleanpontiff2016}
+\bibinfo{author}{McLean, D.}, \bibinfo{author}{Pontiff, J.},
+  \bibinfo{year}{2016}.
+\newblock \bibinfo{title}{Does academic research destroy stock return
+  predictability?}
+\newblock \bibinfo{journal}{The Journal of Finance} \bibinfo{volume}{71},
+  \bibinfo{pages}{5--32}.
+%Type = Article
+\bibitem[{Orimoloye et~al.(2019)Orimoloye, Sung and
+  Johnson}]{orimoloyeetal2019}
+\bibinfo{author}{Orimoloye, L.}, \bibinfo{author}{Sung, M.-C., M.T.},
+  \bibinfo{author}{Johnson, J.}, \bibinfo{year}{2019}.
+\newblock \bibinfo{title}{Comparing the effectiveness of deep feedforward
+  neural networks and shallow architectures for predicting stock price
+  indices}.
+\newblock \bibinfo{journal}{Expert Systems with Applications}
+  \bibinfo{volume}{139}, \bibinfo{pages}{112828}.
+%Type = Article
+\bibitem[{Patton and Timmermann(2010)}]{pattontimmermann2010}
+\bibinfo{author}{Patton, A.}, \bibinfo{author}{Timmermann, A.},
+  \bibinfo{year}{2010}.
+\newblock \bibinfo{title}{Monotonicity in asset returns: New tests with
+  applications to the term structure, the capm, and portfolio sorts}.
+\newblock \bibinfo{journal}{Journal of Financial Economics}
+  \bibinfo{volume}{98}, \bibinfo{pages}{605--625}.
+%Type = Article
+\bibitem[{Piotroski and So(2012)}]{piotroskiso2012}
+\bibinfo{author}{Piotroski, J.}, \bibinfo{author}{So, E.},
+  \bibinfo{year}{2012}.
+\newblock \bibinfo{title}{Identifying expectation errors in value/glamour
+  strategies: A fundamental analysis approach}.
+\newblock \bibinfo{journal}{The Review of Financial Studies}
+  \bibinfo{volume}{25}, \bibinfo{pages}{2841--2875}.
+%Type = Article
+\bibitem[{Probst et~al.(2019)Probst, Wright and Boulesteix}]{probstetal2019}
+\bibinfo{author}{Probst, P.}, \bibinfo{author}{Wright, M.},
+  \bibinfo{author}{Boulesteix, A.L.}, \bibinfo{year}{2019}.
+\newblock \bibinfo{title}{Hyperparameters and tuning strategies for {R}andom
+  {F}orests}.
+\newblock \bibinfo{journal}{arXiv:1804.03515} , \bibinfo{pages}{1--19}.
+%Type = Article
+\bibitem[{Romano and Wolf(2013)}]{romanowolf2013}
+\bibinfo{author}{Romano, J.}, \bibinfo{author}{Wolf, M.}, \bibinfo{year}{2013}.
+\newblock \bibinfo{title}{Testing for monotonicity in expected asset returns}.
+\newblock \bibinfo{journal}{Journal of Empirical Finance} \bibinfo{volume}{23},
+  \bibinfo{pages}{93--116}.
+%Type = Techreport
+\bibitem[{Schnaubelt(2019)}]{schnaubelt2019}
+\bibinfo{author}{Schnaubelt, M.}, \bibinfo{year}{2019}.
+\newblock \bibinfo{title}{A comparison of machine learning model validation
+  schemes for non-stationary time series data}.
+\newblock \bibinfo{type}{Technical Report}. FAU Discussion Papers in Economics.
+%Type = Article
+\bibitem[{Spinu(2013)}]{spinu2013}
+\bibinfo{author}{Spinu, F.}, \bibinfo{year}{2013}.
+\newblock \bibinfo{title}{An algorithm for computing risk parity weights}.
+\newblock \bibinfo{journal}{Available at SSRN:
+  https://ssrn.com/abstract=2297383} .
+%Type = Article
+\bibitem[{Tashman(2000)}]{tashman2000}
+\bibinfo{author}{Tashman, L.}, \bibinfo{year}{2000}.
+\newblock \bibinfo{title}{Out-of-sample tests of forecasting accuracy: An
+  analysis and review}.
+\newblock \bibinfo{journal}{International Journal of Forecasting}
+  \bibinfo{volume}{16}, \bibinfo{pages}{437--450}.
+%Type = Article
+\bibitem[{Toochaei and Moeini(2023)}]{toochaeimoeini2023}
+\bibinfo{author}{Toochaei, M.}, \bibinfo{author}{Moeini, F.},
+  \bibinfo{year}{2023}.
+\newblock \bibinfo{title}{Evaluating the performance of ensemble classifiers in
+  stock returns prediction using effective features}.
+\newblock \bibinfo{journal}{Expert Systems with Applications}
+  \bibinfo{volume}{213}.
+%Type = Techreport
+\bibitem[{WEF(2023)}]{WEO2023}
+\bibinfo{author}{WEF}, \bibinfo{year}{2023}.
+\newblock \bibinfo{title}{Jobs of Tomorrow: Large Language Models and Jobs}.
+\newblock \bibinfo{type}{Technical Report}. World Economic Forum.
+%Type = Article
+\bibitem[{Wright and Ziegler(2017)}]{wrightziegler2017}
+\bibinfo{author}{Wright, M.}, \bibinfo{author}{Ziegler, A.},
+  \bibinfo{year}{2017}.
+\newblock \bibinfo{title}{Ranger: A fast implementation of random forests for
+  high dimensional data in {C}{+}{+} and {R}}.
+\newblock \bibinfo{journal}{Journal of Statistical Software}
+  \bibinfo{volume}{77}, \bibinfo{pages}{1--17}.
+%Type = Article
+\bibitem[{Wu et~al.(2023)Wu, Yang, Fei and Wang}]{WU2023120850}
+\bibinfo{author}{Wu, Z.}, \bibinfo{author}{Yang, L.}, \bibinfo{author}{Fei,
+  Y.}, \bibinfo{author}{Wang, X.}, \bibinfo{year}{2023}.
+\newblock \bibinfo{title}{Regularization methods for sparse esg-valued
+  multi-period portfolio optimization with return prediction using machine
+  learning}.
+\newblock \bibinfo{journal}{Expert Systems with Applications}
+  \bibinfo{volume}{232}, \bibinfo{pages}{120850}.
+\newblock \URLprefix
+  \url{https://www.sciencedirect.com/science/article/pii/S0957417423013520},
+  \DOIprefix\doi{https://doi.org/10.1016/j.eswa.2023.120850}.
+%Type = Article
+\bibitem[{Zhao et~al.(2023)Zhao, Ma, Li and Zhang}]{ZHAO2023119707}
+\bibinfo{author}{Zhao, T.}, \bibinfo{author}{Ma, X.}, \bibinfo{author}{Li, X.},
+  \bibinfo{author}{Zhang, C.}, \bibinfo{year}{2023}.
+\newblock \bibinfo{title}{Asset correlation based deep reinforcement learning
+  for the portfolio selection}.
+\newblock \bibinfo{journal}{Expert Systems with Applications}
+  \bibinfo{volume}{221}, \bibinfo{pages}{119707}.
+\newblock \URLprefix
+  \url{https://www.sciencedirect.com/science/article/pii/S0957417423002087},
+  \DOIprefix\doi{https://doi.org/10.1016/j.eswa.2023.119707}.
+
+\end{thebibliography}

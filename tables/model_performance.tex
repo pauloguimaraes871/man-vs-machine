@@ -1,0 +1,35 @@
+\begin{table}[h]
+\captionsetup{
+  justification=raggedright,
+  labelsep=none,
+  singlelinecheck=false,
+  labelformat=boldlabel,
+}
+\renewcommand{\arraystretch}{1.25}
+\caption[Table 4: \footnotesize ]{\footnotesize \textbf{: Out-of-sample net active summary statistics across ML models.} This table reports out-of-sample net active summary statistics for portfolios built from each individual ML model, under Cross-Sectional (CS) and Risk-Parity (RP) construction. Models are OLS, Elastic Net (GLMNET), Random Forest (RF), XGBoost (XGB) and three neural networks (NN1--NN3). Annualized Active Geometric Return (Ret.), Tracking Error (TE), Information Ratio (IR), Active Expected Shortfall (AES), Active Ulcer Index (Ulcer), Annualized Active Martin Ratio (MR), CAPM alpha ($\alpha$, in percent per month) and its t-statistic ($t(\alpha)$) are displayed. Portfolio returns are net of transaction costs and of a 1\% p.a. management fee.}
+\footnotesize
+\begin{tabularx}{\linewidth}{>{\raggedright\arraybackslash}m{2.5cm}*{8}{>{\raggedleft\arraybackslash}X}}
+\hline
+Portfolio & Ret. & TE & IR & AES & Ulcer & MR & $\alpha$ & $t(\alpha)$ \\
+\hline
+\multicolumn{9}{l}{\textit{Cross-Sectional weighting (CS)}} \\
+OLS & 0.054 & 0.096 & 0.56 & 0.048 & 0.093 & 0.59 & 0.582 & 2.15 \\
+GLMNET & 0.027 & 0.086 & 0.32 & 0.043 & 0.063 & 0.43 & 0.352 & 1.50 \\
+RF & 0.055 & 0.093 & 0.59 & 0.047 & 0.054 & 1.01 & 0.602 & 2.47 \\
+XGB & 0.064 & 0.083 & 0.77 & 0.039 & 0.035 & 1.82 & 0.640 & 2.82 \\
+NN1 & 0.009 & 0.091 & 0.10 & 0.049 & 0.082 & 0.11 & 0.198 & 0.79 \\
+NN2 & 0.045 & 0.094 & 0.47 & 0.054 & 0.087 & 0.51 & 0.509 & 1.98 \\
+NN3 & 0.036 & 0.094 & 0.38 & 0.045 & 0.053 & 0.68 & 0.455 & 1.83 \\
+\hline
+\multicolumn{9}{l}{\textit{Risk Parity (RP)}} \\
+OLS & 0.064 & 0.090 & 0.72 & 0.047 & 0.068 & 0.94 & 0.667 & 2.78 \\
+GLMNET & 0.047 & 0.076 & 0.62 & 0.039 & 0.041 & 1.16 & 0.501 & 2.47 \\
+RF & 0.068 & 0.088 & 0.78 & 0.045 & 0.044 & 1.56 & 0.693 & 3.00 \\
+XGB & 0.061 & 0.077 & 0.79 & 0.038 & 0.039 & 1.54 & 0.595 & 2.84 \\
+NN1 & 0.034 & 0.080 & 0.43 & 0.045 & 0.052 & 0.66 & 0.401 & 1.85 \\
+NN2 & 0.055 & 0.086 & 0.64 & 0.045 & 0.051 & 1.08 & 0.583 & 2.52 \\
+NN3 & 0.064 & 0.087 & 0.73 & 0.042 & 0.042 & 1.50 & 0.650 & 2.81 \\
+\hline
+\end{tabularx}
+\label{modelret}
+\end{table}

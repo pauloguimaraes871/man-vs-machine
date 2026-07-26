@@ -1,0 +1,1319 @@
+%% 
+%% Copyright 2007-2020 Elsevier Ltd
+%% 
+%% This file is part of the 'Elsarticle Bundle'.
+%% ---------------------------------------------
+%% 
+%% It may be distributed under the conditions of the LaTeX Project Public
+%% License, either version 1.2 of this license or (at your option) any
+%% later version.  The latest version of this license is in
+%%    http://www.latex-project.org/lppl.txt
+%% and version 1.2 or later is part of all distributions of LaTeX
+%% version 1999/12/01 or later.
+%% 
+%% The list of all files belonging to the 'Elsarticle Bundle' is
+%% given in the file `manifest.txt'.
+%% 
+%% Template article for Elsevier's document class `elsarticle'
+%% with harvard style bibliographic references
+
+\documentclass[preprint,12pt,authoryear]{elsarticle}
+
+%% Use the option review to obtain double line spacing
+%% \documentclass[authoryear,preprint,review,12pt]{elsarticle}
+
+%% Use the options 1p,twocolumn; 3p; 3p,twocolumn; 5p; or 5p,twocolumn
+%% for a journal layout:
+%% \documentclass[final,1p,times,authoryear]{elsarticle}
+%% \documentclass[final,1p,times,twocolumn,authoryear]{elsarticle}
+%% \documentclass[final,3p,times,authoryear]{elsarticle}
+%% \documentclass[final,3p,times,twocolumn,authoryear]{elsarticle}
+%% \documentclass[final,5p,times,authoryear]{elsarticle}
+%% \documentclass[final,5p,times,twocolumn,authoryear]{elsarticle}
+
+%% For including figures, graphicx.sty has been loaded in
+%% elsarticle.cls. If you prefer to use the old commands
+%% please give \usepackage{epsfig}
+
+%% The amssymb package provides various useful mathematical symbols
+\usepackage{amssymb}
+%% The amsthm package provides extended theorem environments
+%% \usepackage{amsthm}
+
+%% The lineno packages adds line numbers. Start line numbering with
+%% \begin{linenumbers}, end it with \end{linenumbers}. Or switch it on
+%% for the whole article with \linenumbers.
+%% \usepackage{lineno}
+
+\usepackage{array}
+\usepackage{tabularx}
+\usepackage{makecell}
+\usepackage{multirow}
+\usepackage{graphicx}
+\usepackage{titlesec}
+\usepackage{subcaption} 
+\usepackage{chngcntr}
+\usepackage{hyperref}
+\hypersetup{colorlinks,citecolor=blue}
+\usepackage[title]{appendix}
+\usepackage{appendix}
+\usepackage{pdfpages}
+\usepackage{amsmath}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{mathtools}
+\usepackage{graphicx}
+\usepackage{subcaption}
+\usepackage{float}
+
+% Adjust paragraph spacing
+\titleformat{\paragraph}[display]{\normalfont\normalsize\itshape}{\theparagraph}{1pt}{}
+\titlespacing{\paragraph}{0pt}{6pt}{6pt}
+
+\newcommand*{\transp}[2][-3mu]{\ensuremath{\mskip1mu\prescript{\smash{\mathrm t\mkern#1}}{}{\mathstrut#2}}}%
+
+\DeclareMathOperator*{\argmin}{arg\,min} % thin space, limits underneath in displays
+\graphicspath{ {./images/} }
+
+\DeclareMathOperator*{\argmax}{arg\,max}
+
+
+% Define a custom command to make text bold
+\DeclareCaptionLabelFormat{boldlabel}{\textbf{#1 #2}}
+
+
+\journal{31st Annual MFS Conference}
+
+
+\begin{document}
+
+\begin{frontmatter}
+
+\title{Man vs Machine: Can AI-based stock-picking outperform human skill?}
+
+%Authors and affiliations
+\author[unb]{Paulo Roberto Fonteles Guimarães\corref{cor1}}
+\ead{pauloguimaraes871@gmail.com}
+\author[unb]{Herbert Kimura}
+\ead{herbert.kimura@gmail.com}
+
+%\cortext[cor1]{Corresponding author. Phone: +55 61 98184-2023}
+
+%\address[unb]{Universidade de Brasília, Department of Management, Brasília, DF, Brazil}
+
+
+
+\begin{abstract}
+AI’s potential to replace human roles is a prominent concern and jobs in financial markets industry may be specially jeopardized. This study compared out-of-sample performance of Machine-Learning models and human managers in equity portfolio management, which involves deciphering the complex, non-linear and time-varying individual stocks return-generating process. Through a walk-forward validation scheme and grid-search, various models and ensembles were used to forecast benchmark-relative returns with 46,312 monthly observations and nearly one hundred factor zoo features. Rules-based, Risk-Parity, and Mean-Tracking-Error portfolios backtested these models ability to generate economic value, producing significant out-of-sample alphas (t-stats above 3.0 or 4.0) and better risk-adjusted returns than equity funds composites, including Best-in-Class. Although not conclusive proof of human replacement, these findings highlight Machine-Learning relevance in equity portfolio management.
+\vspace{0.5em}
+\noindent
+
+
+\end{abstract}
+
+
+\begin{keyword}
+factor zoo \sep asset pricing \sep machine-learning \sep return prediction \sep emerging markets \sep risk-parity \sep portfolio optimization 
+
+
+%% PACS codes here, in the form: \PACS code \sep code
+
+%% MSC codes here, in the form: \MSC code \sep code
+%% or \MSC[2008] code \sep code (2000 is the default)
+
+\end{keyword}
+
+\end{frontmatter}
+
+%% \linenumbers
+
+%% main text
+\section{Introduction}
+\label{sec:introduction}
+
+Recently, Artificial Intelligence (AI) popularity has been soaring. In fact, according to Google Trends, the topic has reached unprecedented worldwide levels of interest since the start of 2022, peaking at the end of 2024.
+
+Despite the economic benefits usually associated, such as productivity increase, these tools also cause many concerns to the general public, a phenomenon denominated AI anxiety, with job replacement being one of the main factors \citep{lihuang2020}. In a recent survey of Ernst \& Young, 75\% of respondents fear that AI can impact their income or make their job obsolete, a concept called Fear of Being Obsolete - FOBO \citep{diasioetal2023}.  
+
+In this sense, the World Economic Forum evaluated the exposure of different industries to AI, by analysing 19,000 individual tasks across 867 occupations, finding that  financial services and capital markets have the highest exposure to automation \citep{WEO2023}.
+
+To assess FOBO in equity portfolio management, this study applied ML models to predict individual stock returns in Brazil, a country that can be considered an honest out-of-sample environment for the asset pricing literature, given its segmentation, the fact that most anomalies were proposed in the US and the point that Brazil's datasets mostly start after 2004, thus after the discovery of many of the most famous anomalies \citep{karolyi2016}.
+
+Methods included simple linear models, penalized linear regressions, tree-based methods, neural networks, and a linear ensemble of models. The fitting process involved splitting the sample into three sets: training, validation, and testing, hence simulating out-of-sample behavior. Hyperparameter tuning followed Bayesian Optimization in a walk-forward scheme. Finally, hundreds of features were built based on common themes from asset pricing literature, besides sector dummies.
+
+To honestly assess ML models' out-of-sample economic value compared to human managers, many portfolio construction methods were applied, covering simple heuristics, risk-parity, hierarchical risk-parity, constrained Mean-Tracking Error and a 2-step portfolio construction procedure that mimics the common top-down approaches commonly applied by practitioners. We form only long-only portfolios, consider both transaction costs and management fees, discard microcaps and we apply a multiple-control aware characteristic selection strategy that aims to control the selection bias intrinsic to the choice of features. The focus is on being able to attribute the differences in performance to ML and not to other artifacts.
+
+ML portfolios were compared with the average active equity fund manager, top quartile manager (Best-in-Class) and Ibovespa (IBOV), Brazil's most-used cap-weighted equity benchmark.
+
+Results indicate that ML portfolios produced superior risk-adjusted returns compared to benchmarks, as assessed by various metrics. Nevertheless, ML's out-of-sample performance can still face periods of poor predictability. Moreover, being ML fundamentally different, hence possibly low correlated to human managers, combining both approaches could enhance diversification and information ratios.
+
+%HK.
+% Insert a paragraph explainng contributions and implications of the study for theory and practice or practitioners.
+
+
+%HK.
+The paper is structured as follows. In the next section, we briefly discuss the asset pricing literature related to our study. Then, we thoroughly present the methods and data used in the empirical analysis. The main results of the study are examined, and finally, we conclude the paper with implications for theory and practice. 
+
+\section{Asset Pricing Literature}
+\label{sec:literature}
+
+Asset pricing is a well-explored topic, dating back to the early 19th century \citep{poitrasjovanovic2001}. The cornerstone model is the Capital Asset Pricing Model (CAPM), which linearly describes equilibrium expected future returns based on exposure to systematic market risk. CAPM and related equilibrium models are based on the fair game hypothesis, according to which strategies based on an information set cannot produce expected returns in excess of equilibrium expected returns conditional to this set \citep{fama1970}.   
+   
+Despite its relevance, the CAPM fails to explain many findings, as subsequent empirical research explored numerous variables and found many statistically significant relationships with expected returns \citep{greenhandzhang2013, maiti2019}, suggesting that the cross-section of expected returns is more complex than the CAPM posits. These empirical findings, which challenge the assumption that the market portfolio is the sole driver of returns, are often denominated anomalies \citep{coqueretguida2020}.
+
+In fact, hundreds of anomalies have been documented, collectively defining the "factor zoo" \citep{cochrane2011}, raising a debate over the literature's credibility. Some argue that many findings are false, stemming from p-hacking and publication biases, which explain the lower post-publication performance and even irreproducibility of some results  \citep{harveyliuzhu2016}; \citep{harveyliu2019}; \citep{linnainmaaroberts2018}; \citep{chordiagoyalsaretto2020}; \citet{houxuezhang2017}; \citep{mcleanpontiff2016}. However, others believe that p-hacking explanations are insufficient to explain some large t-stats obtained by certain anomalies \citep{chen2022} and also disagree with some irreproducibility  claims, attributing differences in results to methodological choices concerning benchmark asset pricing models and weighting schemes \citep{jacobsmuller2020}; \citep{aghassiasnessfattouchemoskowitz2023}; \citep{jensenkellypedersen2023}. 
+
+Traditional asset pricing literature often relies on characteristics-sorted portfolios and Fama-MacBeth regressions to identify anomalies/factors, but those methods have limitations. For instance, they struggle to capture non-linear relationships between characteristics and expected future returns, model interactions between signals and between signals and industries. Finally, they are prone to overfitting in the high-dimensional cross-section of expected future returns \citep{kellyxiu2023}; \citep{cattaneocrumpfarrellschaumburg2020}; \citep{goyal2012}; \citep{pattontimmermann2010}; \citep{romanowolf2013}; \citep{aghassiasnessfattouchemoskowitz2023}; \citep{piotroskiso2012}; \citep{asnessporterstevens2000}.
+
+More flexible methods have been employed to address high-dimensionality and non-linearity in return prediction, aiming to strike a better balance between model complexity and approximation of the highly complex, time-dependent, and non-linear data generating process of asset returns. ML offers a diverse range of flexible alternatives compared to traditional models, better approximating the data generating process of cross-sectional returns while handling high-dimensional feature sets. In simple terms, this is achieved by incorporating non-linearities, interactions among signals, and tuning hyperparameters on validation samples to mitigate overfitting and improve out-of-sample forecasting \citep{gukellyxiu2020, kellyxiu2023, kellymalamudzhou2022}.
+
+Besides aggregate and individual return prediction, ML has notable applications in portfolio optimization, yield and volatility forecasting, option valuation, and mutual fund manager selection \citep{kellyxiu2023}. In portfolio selection, various studies explore ML techniques aiming at providing better risk-adjusted returns (e.g. \citet{DU2022117005, WU2023120850, DAI2024124565, ZHAO2023119707, ALZAMAN2024121404, MA2021113973}.
+
+\section{Methods and Data}
+\label{sec:methods}
+The endeavour involves a dependent variable that is either a forward return or risk-adjusted return metric. Instead of raw returns, benchmark-relative active returns were considered, better neutralizing sources of systematic risks. Moreover, unlike absolute returns, active returns are more relevant to the portfolio optimization problem of benchmark-sensitive equity managers \citep{hsuetal2022}.
+
+Following \citet{gukellyxiu2020}, we refer to the flexible functional form $g^{*}(.)$ to express the generating process of excess returns:
+
+\begin{equation}
+\label{maineq}
+EXR_{i,t+h} = E_{t}(R_{i,t+h} - R_{m,t+h}|\mathbf{z_{i,t}}) + \epsilon_{i,t+h} = g^{*}(\mathbf{z_{i,t}}) + \epsilon_{i,t+h}
+\end{equation}
+
+where $EXR_{i,t+h}$ represents $h$-month return $R_{i,t+h}$ of stock $i$ at time $t+h$ in excess to market-cap weighted benchmark return $R_{m,t+h}$. Conditional on a set of $j = 1, \ldots, J$ firm-level characteristics $\mathbf{z_{i,t}}$, $g^{*}(\mathbf{z_{i,t}})$ represents a general flexible function that neither depends on $i = 1, \ldots, I$ or $t = 1, \ldots, T$, making estimates more stable \citep{deprado2018}. Following \citet{blitzetal2023}, $h$ is chosen as 3 and IBOV was chosen as cap-weighted benchmark.
+
+The data used in this study comprises monthly observations from Brazilian listed stocks between October 2005 and May 2024, covering $T = 224$ months and more than one thousand stocks, which come down to $I = 578$ after liquidity filtering, in an unbalanced panel due to stocks being listed and delisted. Therefore, a observation $n = 1, \ldots, N$ consists of a combination of $i$ and $t$.
+
+Based on raw financial and market point-in-time metrics from Comdinheiro, $J = 105$ features were constructed, including valuation metrics, past price and return information (including momentum, short-term reversal, skewness, MAX and others), market cap and liquidity indicators, a comprehensive set of accounting indicators covering quality, profitability, leverage, investment and accruals anomalies, growth rate and standardized unexpected realizations of accounting indicators, risk measures related to market prices and fundamentals, short interest ratios, debt and equity issuance indicators, seasonality,  and sector classifications. While the majority of variables are constructed in an absolute fashion, some industry-relative factors were also developed to account for within-industry effects, following \cite{asnessporterstevens2000}.
+
+Comparatively, \citet{lewellen2015}, \citet{freybergerneuhierlweber2020}, and \citet{gukellyxiu2020} used 15, 36, and 94 signals, respectively. In the latter study, the authors interacted original features with aggregate macroeconomic predictors, increasing the total number of covariates to 920. For analytical purposes when trying to understand feature importance, we categorized variables in different themes. Further details are provided in the Appendix. Finally, differences in definitions from original studies may exist because of data availability.    
+
+Each month $t$, characteristics were winsorized to percentiles 97.5\% and 0.025\% and then normalized to the $[-1,1]$ interval. This procedure limits the effect of outliers and possible errors in the database. Importantly, at each month $t$, only data existing at that time was used for normalization, preventing forward-looking biases and data leakage \citep{coqueretguida2020, gukellyxiu2020, hanauerkalsbach2023}.
+
+Another important consideration in terms of data cleansing and pre-processing relates to missing observations. Imputation was done by applying the KNN algorithm in a time-wise manner (ie. using only data available at $t$ to impute $t$).
+
+Due to their abundance, micro and nanocap stocks tend to heavily influence estimates. However, their generally low liquidity poses real constraints on position sizing, especially for large investors. Therefore, for each period, stocks were ordered by mean 3-month trading volume, and those in the 0.5\% percentile were excluded, following \citet{houxuezhang2017}, \citet{jensenkellypedersen2023}, and \citet{hanauerkalsbach2023}. Despite their minimal participation in total trading volume, this group accounts for more than 50\% of total observations.
+   
+We reinforced point-in-time information by comparing the publication date of each statement with each respective date, and relabeled each ticker with its respective CVM code, thus ensuring adequate computation of features that require time-series information. After cleaning and pre-processing, a total of $N = 44,351$ observations were used for training, validation, and testing.
+
+Although feature selection is already implemented by some of the algorithms used and despite the fact that many of the most-famous anomalies have already been published before the beginning of our sample, we implemented an additional remedy for selection bias. Each of the $J$ characteristics are embedded in cap-scaled portfolios and then, in a consistent walk-forward scheme, net of costs returns are tested for significantly positive alphas, after adjusting for multiple testing with the Benjamini-Hochberg procedure.      
+
+
+\subsection{Choosing $g()$}
+As mentioned, ML literature provides options to approximate $g^{*}()$. Typically, for a given $g(\mathbf{z_{i,t}}, \mathbf{\theta})$ associated to model $m = 1, \ldots, M$, one must decide on the model's complexity $P_{m}/N$, where $P_{m}$ is the length of the parameters vector $\mathbf{\theta_{m}} = (\theta_{m,1}, \theta_{m,2}, \ldots, \theta_{m, P_{m}})$.
+
+Complexity is a very important aspect in return prediction. A simple model with few parameters will poorly approximate $g^{*}()$, even though its estimates have low variance, making them more stable. Conversely, complex models with more parameters tend to better approximate $g^{*}()$, but have higher variance. This is known as the bias-variance trade-off, a central concept in ML.
+
+In ML, balancing bias and variance and determining the complexity of $g()$ entails tuning model-specific hyperparameters vectors $\mathbf{\lambda_{m}} = (\lambda_{m,1}, \lambda_{m,2}, \lambda_{m,V_{m}})$, which enables shrinkage of $\mathbf{\theta_{m}}$ estimates and selection of complexity based on simulated out-of-sample behavior. 
+
+\citet{kellymalamudzhou2022} argue that, given optimal shrinkage, expected out-of-sample expected returns are strictly increasing in complexity due to very unstable and non-linear behavior of stock returns requiring more parametrization. Hence, they argue that even highly complex models (even when there are more parameters than observations) can generate substantial out-of-sample Sharpe ratios.
+
+Bayesian optimization is the hyperparameter-tuning procedure used. It searches over bounded hyperparameter values \(\lambda_{m} \in \Lambda_{m}\), evaluates each candidate by validation-sample Root-Mean-Squared-Error (RMSE), and then sequentially proposes new candidates using an upper-confidence-bound acquisition rule. Thus, the method balances exploitation of hyperparameter regions with low predicted validation error and exploration of uncertain regions of the search space. 
+
+This choice is especially useful in this setting because Brazilian equity data provide a smaller effective sample than broad global datasets, while each ML specification still has several hyperparameters. Under a limited validation budget, grid search may spend many evaluations on uninformative regions of the search space. Bayesian optimization is therefore a sample-efficient tuning rule: it uses previous validation errors to concentrate new trials where improvement is more plausible, while still preserving exploration through the UCB acquisition rule \citep{bouthilliervaroquaux2020, bergstra2012random}.
+
+Candidate values for hyperparameters should strike a balance between computational efficiency and coverage of a wide spectrum of values, thus encompassing various degrees of shrinkage for variance control \citep{lavalle2004relationship}. Following related studies, the bounds adopted for Bayesian-optimization is outlined in Table \ref{hyperchoice}.
+
+Finally, the model is refit using $\tau_{training} \cup \tau_{validation}$ and genuine out-of-sample performance is measured by computing different statistics on $\tau_{testing}$, such that $\tau_{testing} \cap (\tau_{training} \cup \tau_{validation}) = \emptyset$ \citep{kellyxiu2023}. 
+
+Besides RMSE, out-of-sample performance was also assessed by $R^{2}$ ($R_{OOS}^{2}$), under an undemeaned denominator \citep{gukellyxiu2020}, Mean-Absolute-Error (MAE), Mean-Absolute-Percentage-Error (MAPE), Mean Pseudo Huber Error (MPHE), Mean Pinball Error (MPE) and Hit Ratio (HR).
+
+At each rebalancing date, a linear Global Surrogate Model (GSM) is fit to each model predictions, thus enabling the measurement of importance of each feature, computed as the normalized coefficients.  
+
+\subsubsection{Validation Scheme} \label{valshceme}
+In order not to make results dependent on a specific split,  $\mathbf{T}$ splits are considered, such that $\mathbf{\tau_{training}}$, $\mathbf{\tau_{validation}}$ and $\mathbf{\tau_{testing}}$ each represent sets of groups of observations. For each specific split, corresponding groups are disjoint sets.
+
+There are different schemes to split data, and the choice depends on distributional behavior and computational constraints \citep{schnaubelt2019}.
+ 
+A popular approach is $k$-fold Cross-Validation (CV), a resampling approach in which data is randomly divided into $k$ equal-sized folds. A model is trained under $k-1$ folds and the remaining fold is used to compute $\mathbf{L()}$. The process is repeated and the hyperparameter set $\mathbf{\lambda^{*}_{m}}$ that minimizes validation error across folds is chosen \citep{geisser1975}. For the special computationally intensive case $k = N$, the method is called Leave-One-Out CV \citep{schnaubelt2019}.
+
+Although widely used, k-fold CV assumes independently and identically distributed (i.i.d.) observations, a condition often violated by financial data. This approach risks using future data to predict past values, overlooking time-dependent structures. Therefore, walk-forward validation is commonly employed, a sequential scheme in which training, validation, and testing subsets progress through time, preserving the temporal ordering of data \citep{schnaubelt2019, bergmeiretal2018}.
+
+Two main walk-forward schemes exist: rolling and expanding. In rolling schemes, the training sample size remains fixed, causing the training, validation, and test samples to advance in time at each iteration. Conversely, expanding-windows schemes involve enlarging training sets recursively, while the validation and test sets progress \citep{kellyxiu2023, tashman2000}.
+
+Theory and empirical evidence are more supportive of walk-forward schemes when data isn't stationary, a condition that heavily impacts CV \citep{cerqueiraetal2017, bergmeiretal2018, schnaubelt2019}.   Therefore, in this study, a walk-forward expanding scheme, similar to \citet{hanauerkalsbach2023} and \citet{gukellyxiu2020}, is employed. Therefore, at every yearly refit, the training sample is increased, with a fixed origin, and the validation and testing sets are moved forward in time. Initial split considers a buffer period of 120 observations for training and 60 for validation. 
+
+Data leakage is a significant concern when designing the optimal scheme, as it introduces forward-looking bias. In finance, leakage often results in inflated backtests and disappointing out-of-sample risk-adjusted returns \citep{deprado2018}.
+
+In order to prevent leakage, at each fit, a $h$-sized space is introduced, thereby eliminating data points not known at each period.
+
+\subsubsection{Candidates for $g()$}
+
+In this paper, seven models were applied: Ordinary Least Squares (OLS), Elastic Net (ENET), Random Forest (RF), eXtreme Gradient Boosting - XGBoost (XGB) and three Artificial Neural Networks (ANN) with different architectures. Additionally, three ensembles were considered: one of all ANN (E\_ANN), one with nonlinear models (E\_NL), and a final comprising all models (E\_ALL).  
+
+\paragraph{Model 1: OLS}
+For OLS ($m = 1$), there are no hyperparameters to tune, which tends to be a problem in large dimensional sets. For OLS, $g()$ assumes the following linear form:
+
+\begin{equation}
+g(\mathbf{z_{i,t}},\mathbf{\theta_{1}}) = \mathbf{z^{T}_{i,t}} \mathbf{\theta_{1}}
+\end{equation}
+
+In this case, $g()$ is a linear combination of signals and $P_{1}$ parameters. $\theta_{1}$ are estimated by minimizing Mean-Squared Error (MSE) $\mathbf{L_{MSE}()}$ based on the pooled panel:
+
+\begin{equation}
+\mathbf{O_{1}(\mathbf{\theta_{1})}} = \mathbf{L_{MSE}(\mathbf{\theta_{1}})} = \frac{\sum_{i=1}^{I}\sum_{t=1}^{T}(EXR_{i,t+1} - g(\mathbf{z_{i,t}},\mathbf{\theta_{1}}))^2}{N}
+\end{equation}
+
+The biggest problem with OLS is overfitting, as the model's coefficients' variance tends to increase as $P/N \rightarrow 1$, which tends to make OLS perform poorly in the high-dimensional factor zoo.
+
+
+\paragraph{Model 2: ENET}
+
+Regularization, such as $l_{1}$ and $l_{2}$ penalties, enhances out-of-sample performance in regression models. These penalties, included in $\mathbf{O_{2}(\mathbf{\theta_{2}})}$, shrink $\mathbf{\theta_{2}}$ estimates, improving the bias-variance trade-off \citep{jamesetal2013}. 
+
+$l_{2}$ regularization reduces estimates toward zero, curbing large values, whereas $l_{1}$ regularization additionally forces certain covariates to zero, conducting feature selection. The combination of both penalties forms ENET:
+
+\begin{multline}
+\label{elasticeq}
+\mathbf{O_{2}}(\mathbf{\theta_{2}}; \mathbf{\lambda_{2}}) = \frac{\sum_{i=1}^{N}\sum_{t=1}^{T}(EXR_{i,t+1} - g(\mathbf{z_{i,t}},\mathbf{\theta_{2}}))^2}{N} + \\ \lambda^{\psi}_{2}(1-\lambda^{\rho}_{2})\sum_{j=1}^{J}|\theta_{2,j}| + \frac{1}{2}\lambda^{\psi}_{2}\lambda^{\rho}_{2}\sum_{j=1}^{J}\theta_{2,j}^{2}
+\end{multline}
+
+Setting $\lambda^{\psi}_{2} = 0$ is equivalent to OLS.
+
+For $m = 1, 2$, variable importance was determined by the absolute value of estimated coefficients.
+
+\paragraph{Models 3 and 4: Ensembled tree-based regressions}
+
+While ENET improves the bias-variance trade-off through shrinkage, it still imposes a linear functional form, which tends to underperform flexible models that can better approximate $g^{*}()$.  
+
+Regression trees are nonparametric models that introduce non-linearities and interactions among $\mathbf{z_{i,t}}$, by employing sequential splitting rules to cluster observations into bins. 
+
+During tree growth, branches are sequentially formed, splitting observations from the previous step into rectangular partitions based on features, grouping together observations that share a common relationship with the feature. When further splits are not feasible or when reaching a maximum depth $\lambda^{D}_{m \in (3,4)}$, a leaf $l$ emerges. Predictions are then made by averaging the values of ${EXR}_{t+h}$ for observations within each partition \citep{kellyxiu2023}.
+
+$\lambda^{D}_{m \in (3,4)}$ represents the maximum number of separations along the longest branch, so that a tree of depth $\lambda^{D}_{m \in (3,4)}$ can have $\lambda^{D}_{m \in (3,4)} - 1$ interactions. Another tree-specific hyperparameter is number of terminal nodes (leaves) $\lambda^{L}_{m \in (3,4)}$. Both tend to control tree complexity:
+
+\begin{equation}
+g(\mathbf{z_{i,t}}; \mathbf{\theta_{m \in (3,4)}}, \mathbf{\lambda_{m \in (3,4)}}) = \sum_{l=1}^{\lambda^{L}_{m}}\theta_{m \in (3,4), l}\mathbf{1}_{[\mathbf{z_{i,t}} \in C_{l}(\lambda^{D}_{m \in (3,4)})]} 
+\end{equation}
+
+where $C_{l}(\lambda^{D}_{m \in (3,4)})$ is the l-th  partition. $\mathbf{1}_{[\mathbf{z_{i,t}} \in C_{l}(\lambda^{D}_{m m \in (3,4)})]}$ indicates if an observation is in a specific bin and $\theta_{m \in (3,4), l}$ is the average of outcomes relative to that bin:
+
+\begin{equation}
+\theta_{m \in (3,4), l} = \frac{1}{N_{l}}\sum_{\mathbf{z{i,t}}\in  C_{l}(\lambda^{D}_{m \in (3,4)})}{EXR}_{i,t+h}
+\end{equation}
+
+The algorithm to define a region $C_{l}(\lambda^{D}_{m \in (3,4)})$ minimizes MSE. Since considering every possible partition is computationally burdensome, a recursive binary splitting approach is commonly used. This top-down greedy algorithm selects the best split at each step of growing a tree, rather than considering potential impacts in subsequent steps. It begins by selecting characteristic $z_{j}$ and cut-point $z^{*}_{j}$ that lead to the greatest reduction in MSE \citep{breiman1984}. 
+
+The process is repeated until a stopping criterion is called  $(\lambda^{L}_{m \in (3,4)}$ or $\lambda^{D}_{m \in (3,4)})$. 
+
+While a flexible model, a single tree is also prone to overfitting. Therefore, popular choices for improving out-of-sample performance are pruning and ensembling, the latter consisting of regularization by combining multiple trees.
+
+One such ensembling approach is bagging, which generates $\lambda^{T}_{m \in (3,4)}$ trees using bootstrap resampling. Each tree is trained on a subset of $\lambda^{B}_{m \in (3,4)}$ bootstrap samples and then predictions are averaged, reducing variance.
+
+Instead of considering all characteristics, one might use only a random subset, comprising a fraction $\lambda^{R}_{m \in (3,4)}$ of $J$. This reduces the impact of dominant characteristics and creates less correlated trees, improving overall out-of-sample performance. When $\lambda^{R}_{m \in (3,4)} \neq 1$, we have RF ($m = 3$). As shown in Table \ref{hyperchoice}, bagging ($\lambda^{R}_{3} = 1$) is covered during grid-search  \citep{breiman2001}.
+
+Grid-search for $m=3$ focused solely on $\lambda^{R}_{3}$ and $\lambda^{D}_{3})$. $\lambda^{T}_{3}$ was set at a relatively high number to counterbalance variance reduction, computational costs and achieve convergence \citep{probstetal2019}. $\lambda^{B}_{3}$ is set as one and minimal terminal node sizes are set to 1 \citep{wrightziegler2017}, hence controlling $\lambda^{L}_{3}$. 
+ 
+Another ensembling option is boosting, which sequentially grows trees, fitting each new tree to the residuals of the last tree. To prevent overfitting, boosting combines forecasts from individual, usually underfit on their own, shallow trees with depth $\lambda^{D}_{4}$, denominated weak learners, which implies that the algorithm learns slowly \citep{friedman2001}. Therefore, the process is different to RF, in which trees are combined in an independent and agnostic way.     
+
+In particular, the scalable and computationally efficient XGB system of \citet{chenguestrin2016} was applied ($m = 4$).
+
+The model seeks to minimize the regularized objective by using $\lambda^{F}_{4}$ additive functions to predict the output, one step at a time:
+
+\begin{equation}
+\label{objxgb}
+\mathbf{O_{4}}(\mathbf{\theta_{4}},\lambda^{F}_{4}, \Omega(T_{f})) = \sum_{i=1}^{N}\sum_{t=1}^{T}\mathbf{L}(EXR_{i,t+h}, g(\mathbf{z_{i,t}}, \mathbf{\theta_{4}})) + \sum_{f=1}^{\lambda^{F}_{4}}\Omega(T_{f})
+\end{equation}
+
+The first term, measured over all observations, represents a differentiable convex loss-function and the second one is a penalization term:
+
+\begin{equation}
+\Omega(T_{f}) = \lambda^{\gamma}_{4}\lambda^{L}_{4} + \frac{1}{2}\lambda^{\Lambda}_{4} \sum_{l=1}^{\lambda^{L}_{4}}\theta_{4,l}^2 
+\end{equation}
+
+For a given tree $T$, its structure can be defined by $T(\mathbf{z_{i,t}}) = \theta_{q(\mathbf{z_{i,t}})}$, $q: \mathbb{R}^{j} \rightarrow \lambda^{L}_{4}$ where $q$ represents the tree structure that maps an input to its final leaf. The penalty term can be decomposed into a penalty $\lambda^{\gamma}_{4}$ on the total number of leaves, controlling depth, and a shrinkage $\lambda^{\Lambda}_{4}$ that penalizes the magnitude of outputs, reducing variance. 
+
+Equation \ref{objxgb} is used to train the model in an additive greedy manner. Given a previous structure of $f = 1, \ldots, F - 1$ trees, a tree $T_{F}$ is added in such a way to minimize prevailing error: 
+
+\begin{equation}
+\mathbf{O_{4}} = \sum_{i=1}^{I}\sum_{t=1}^{T}\mathbf{L}(EXR_{i,t+h}, m_{f-1}(\mathbf{z_{i,t}}) + T_{F}(\mathbf{z_{i,t}})) + \sum_{f=1}^{\lambda^{F}_{4}}\Omega(T_{F})
+\end{equation}
+
+where $m_{F-1}$ is the model up to tree $T_{F}$. Following the derivation in \citet{coqueretguida2020} and \citet{chenguestrin2016}, for a fixed structure $q(\mathbf{z_{i,t}})$ and assuming a quadratic loss function for $\mathbf{L}$, the optimal weight $\theta^{*}_{4,l}$ of leaf $l$ and corresponding optimal objective can be, respectively, given by Equations \ref{w*} and \ref{objective}:
+
+\begin{equation}
+\label{w*}
+\theta^{*}_{4,l} = \frac{\sum_{(i,t) \in I_{l}}(EXR_{i, t+h} - m_{F-1}(\mathbf{z_{i,t}}))}{1 + \frac{\lambda^{\Lambda}_{4}}{2} \#\{(i,t) \in I_{l}\}}
+\end{equation}
+
+\begin{equation}
+\label{objective}
+\mathbf{O}_{\mathbf{4},\lambda^{L}_{4}}(q) = -\frac{1}{2}\sum_{l=1}^{\lambda^{L}_{4}}\frac{(EXR_{i, t+h} - m_{F-1}(\mathbf{z_{i,t}}))^{2}_{(i,t) \in I_{l}}}{1 + \frac{\lambda^{\Lambda}_{4}}{2} \#\{(i,t) \in I_{l}\}} + \lambda^{\gamma}_{4}\lambda^{L}_{4}
+\end{equation}
+
+$\#$ counts the items in set $I_{l}$, representing observations in leaf $l$. Equation \ref{objective} serves as a scoring function for a $q$ structure.
+ 
+To build $q$, the algorithm, at each node, checks if a split is useful according to the objective function. This is a greedy approach to tree growth, as considering all possible $q$ is impractical. The gain from a split is calculated as:
+
+\begin{multline}
+\mathbf{O_{split}} = \frac{1}{2}\bigg[
+    \frac{\sum_{(i,t) \in I_{left}}(EXR_{i, t+h} - m_{F-1}(\mathbf{z_{i,t}}))^{2}}{1 + \frac{\lambda^{\Lambda}_{4}}{2} \#\{(i,t) \in I_{left}\}}  + \\
+    \frac{\sum_{(i,t) \in I_{right}}(EXR_{i, t+h} - m_{F-1}(\mathbf{z_{i,t}}))^{2}}{1 + \frac{\lambda^{\Lambda}_{4}}{2} \#\{(i,t) \in I_{right} \}} - \\
+    \frac{\sum_{(i,t) \in I}(EXR_{i, t+h} - m_{F-1}(\mathbf{z_{i,t}}))^{2}}{1 + \frac{\lambda^{\Lambda}_{4}}{2} \# \{(i,t) \in I \} } \bigg] - \lambda^{\gamma}_{4} 
+\end{multline}
+
+In this case, $I = I_{left} \cup I_{right}$ measures the original gain, while the other two correspond to gains of left and right bins. The penalty term $\lambda^{\gamma}_{4}$ controls the minimum loss reduction required to make a further partition.
+
+Besides a $\lambda^{\Lambda}_{4}$ $l_{2}$ normalization, a $l_{1}$ $\lambda^{\alpha}_{4}$ penalty on weights can also be introduced. This way, the penalty function is as follows:
+
+\begin{align}
+\Omega(T_{f}) = & \lambda^{\gamma}_{4}  \lambda^{L}_{4} + 
+ \frac{1}{2}\lambda^{\Lambda}_{4} \sum_{l=1}^{\lambda^{L}_{4}}\theta_{4,l}^2 +
+\lambda^{\alpha}_{4}\sum_{l=1}^{\lambda^{L}_{4}}|\theta_{4,l}|
+\end{align}
+
+XGB also implements variance reduction through a shrinkage parameter that scales each $\theta_{l}$ by a learning rate $\lambda^{\eta}{4} \in (0,1]$, after each step of tree boosting. This reduces the influence of each individual tree, letting future trees improve the overall model and preventing overfitting, as a large number of aggregate optimized trees may introduce significant generalization error. Another technique used to improve variance is feature subsampling, set by $\lambda^{R}{4}$, akin to RF, or row subsampling $\lambda^{S}_{4}$, which works in a similar manner.
+
+Another crucial resource for training the model is early stopping, which involves halting the learning process when validation error ceases to improve after $\lambda^{\phi}_{4}$ rounds.
+
+For tree methods, feature importance was calculated based on global overall gain attributed to subsequent splits related to a specific feature, across the nodes for which the characteristic was selected \citep{ishwaran2014}. 
+
+\paragraph{Model 5: Neural Networks}
+
+Widely used across various tasks, including financial problems, ANN are the final models used to approximate $g^{*}()$. These highly flexible models can arbitrarily approximate continuous functions with at least one hidden layer, by continuously adding new units \citep{costarellispiglervinti2016}.
+
+ANN, mainly feed-forward ones, are commonly used in return prediction due to their flexible structures. Information flows from covariates, through hidden layers that apply nonlinear functions, to the output layer, which aggregates predictions into the final outcome. These networks compound together functions, forming a chain, and the chain's length, interpreted as model depth, is associated with the idea of deep learning \citep{Goodfellow-et-al-2016}. As such:
+
+\begin{equation}
+g(\mathbf{z_{i,t}}) = g^{(3)}(g^{(2)}(g^{(1)}(\mathbf{z_{i,t}})))
+\end{equation}
+
+in which $g^{(1)}$, $g^{(2)}$ and $g^{(3)}$ are first, second and third layers of the network. A simple network with one hidden layer with two units consists of first applying $\mathbf{h} = g^{(1)}(\mathbf{z_{i,t}}, \mathbf{\theta^{(1)}_{5}})$ and then $g^{(2)}(\mathbf{h}, \mathbf{\theta^{(2)}_{5}}, \theta_{0}^{(2)})$, where subscripts denote layers. For $g^{(1)}$, a common choice is a nonlinear function, often an affine transformation controlled by learned parameters followed by an activation function \citep{Goodfellow-et-al-2016}. Following \citet{gukellyxiu2020} and \citet{hanauerkalsbach2023}, the popular rectified linear unit (ReLU) activation function is used \citep{fenglu2019}.
+
+
+\begin{equation}
+ReLU(x) = \max(0,x)
+\end{equation}
+
+Therefore, the network is:
+
+\begin{equation}
+\label{simplenn}
+g(\mathbf{z_{i,t}}, \mathbf{\theta^{(1)}_{5}}, \mathbf{\theta^{(2)}_{5}}) = \transp{\mathbf{\theta^{(2)}_{1,5}}}\max(0, \transp{\mathbf{\theta^{(1)}_{1,5}}}{\mathbf{z_{i,t}}} + \theta_{0,5}^{(1)}) +  \theta_{0,5}^{(2)}
+\end{equation}
+
+There are numerous architectures for an ANN, being Equation \ref{simplenn} a simple choice. By defining $\lambda^{U^{(\pi)}}_{5}$ as the number of units in each layer $\pi = 1, \ldots, \lambda^{\pi}_{5}$ and setting the output of unit $u$ in layer $\pi$ as $o^{(\pi)}_{u}$, with $o^{0}$ being initialized with the features, one has the following iterative equation for the network at each unit in layer $\pi \neq 0$:
+
+\begin{equation}
+    o^{(\pi)}_{u} = \max(0, \transp{\mathbf{\theta_{u,5}^{(\pi-1)}}}o^{(\pi-1)})
+\end{equation}
+
+Grid searching all possible structures is demanding, so architectures are usually set in advance.
+
+Given results of \citet{eldanshamir2016}, \citet{gukellyxiu2020}, and \citet{orimoloyeetal2019} on shallow (up to three layers) networks outperforming deep ones in return prediction, especially in smaller datasets, three architectures are predefined, with neuron numbers following the geometric pyramid rule of \citet{masters1993}.
+
+Therefore, models consisted of ANN1 - a single hidden layer with 32 neurons, ANN2 - two layers with 32 and 16 neurons, and ANN3 - three hidden layers with 32, 16, and 8 neurons.
+
+In order to optimize, the following objective function is defined:
+
+\begin{equation}
+\label{objnn}
+\mathbf{O_{5}} = 
+\sum_{i=1}^{I}\sum_{t=1}^{T}\mathbf{L}(EXR_{i,t+h}, g(z_{i,t}, \mathbf{\theta_{5}}) + \Omega(\mathbf{\theta_{5}})    
+\end{equation}
+
+Due to their high parametrization and nonlinear nature, ANN are typically trained using Stochastic Gradient Descent (SGD). This is done to reduce computational demands, though it may impact accuracy \citep{bottoubousquet2012}. SGD's effectiveness can be sensitive to initial values, so it's often recommended to initialize feedforward networks with small random values \citep{Goodfellow-et-al-2016}.
+
+
+Gradient descent involves updating weights according to:
+
+\begin{equation}
+\mathbf{\theta_{5}} \leftarrow \mathbf{\theta_{5}} - \lambda^{\eta}_{5}\frac{\partial{\mathbf{L}(EXR_{i,t}, g(z_{i,t}, \mathbf{\theta_{5}}))}}{\partial{\mathbf{\theta_{5}}}}
+\end{equation}
+
+where $\mathbf{\theta_{5}}$ denotes all weights of the network. The choice of $\lambda^{\eta}_{5}$ is crucial, as large values may cause the algorithm not to converge.
+
+The finite difference method is commonly used to approximate derivatives. By leveraging the chain rule and recycling mechanism detailed in \citet{coqueretguida2020}, computation speed can be improved. During back-propagation, derivatives are computed from the last layer to the first, opposite to the forward pass that evaluates the loss. 
+
+
+To enhance computational efficiency while leveraging the benefits of SGD, it's common to use intermediate steps between SGD and using the entire training sample. This is achieved by sampling random groups of instances, called batches, with a given size $ \lambda^{b}_{5} $. To cover the full sample, $ \frac{N}{\lambda^{b}_{5}} $ iterations are needed, and once all batches are used to update $ \mathbf{\theta_{5}} $, an epoch is reached. SGD is a special case of this approach when $ \lambda^{b}_{5} = 1 $. In addition to $ \lambda^{b}_{5} $, the number of epochs $ \lambda^{e}_{5} $ must also be set.
+
+
+In this work, we adopted the Adam algorithm, which efficiently estimates first and second-order moments. It's well-suited for highly parametrized models \citep{kingmaba2014}.
+     
+The second part of \ref{objnn} refers to the penalization term $\Omega(\mathbf{\theta_{5}})$, which incorporates $l_{1}$ and $l_{2}$ penalizations:
+
+\begin{equation}
+\Omega(\mathbf{\theta_{5}}) = \sum_{k=1}^{K} \lambda^{\omega}_{5} ||\mathbf{\theta_{k,5}}|| + \sum_{j=1}^{J}\lambda^{\delta}_{5}||\mathbf{\theta_{j,5}}||^{2}
+\end{equation}
+
+where $k$ and $j$ refer to which $\theta$ $l_{1}$ and $l_{2}$ penalizations were applied.
+
+
+Other regularization methods include early stopping, which halts training before epoch $\lambda^{e}{5}$ if there is no improvement in validation error for more than $\lambda^{\phi}{5}$ epochs, and Dropout, which randomly omits $\lambda^{R}_{5}$ of neurons, shrinking the network \citep{srivastavaetal2014}. \citet{lee2020} found that dropout can efficiently decrease overfitting risk in the context of stock return prediction with deep neural networks.
+
+The batch normalization method of \citet{ioffeszegedy2015} is applied, which adaptively normalizes layer inputs over training to aid in gradient propagation. Even if data is normalized in pre-processing, transformations applied may cause internal covariate shift in data. Finally, an ensemble approach is used, employing $\lambda^{\iota}_{5}$ random seed weight initializers and averaging all predictions \citep{dietterich2000}.
+
+\paragraph{Ensembles}
+
+
+Finally, ensembling was applied, combining predictions from different models. This method, used in studies like \citet{toochaeimoeini2023}, improves generalization. Combining predictions tends to yield more accurate forecasts, especially when errors are low-correlated \citep{kunchevawhitaker2003}.
+
+Various methods, including linear combinations and stacked ensembles, can be used. In this work, we considered a linear equal-weighted ensemble.
+
+
+\subsection{ML Portfolios}
+
+ML expected returns were used as inputs to build portfolios and backtest investment strategies. All portfolios used these forecasts to form investable sets, selecting the quartile of stocks $s = 1, \ldots, S$ with the highest forecast, thus reducing dimensionality for portfolio allocation \citep{coqueretguida2020}. 
+
+Each portfolio started in February 2016, the first out-of-sample month, considering training and validation sample sizes. Rebalancing occurred in March, April, May, August, and November to balance the trade-off between new accounting information and turnover. A 7 bps direct transaction cost was assumed, with market impact costs estimated using Barra's square root model \citep{barra1997}. Buffering was applied to reduce turnover, and stocks with benchmark weights greater than 0.03 were also included in the investable set to reduce tracking error.
+
+
+\subsubsection{Heuristic Portfolios}
+
+Initial portfolios utilize heuristic methods like Equal-Weighted (EW), Signal-Weighted (SW), Capitalization-Weighted (CW), and Capitalization-Scaled (CS). These methods do not rely on the covariance matrix for weight determination \citep{ghayurheaneyplatt2019}. Weights for EW, SW, CW, and CS are as follows:
+
+\begin{equation}
+w_{s,EW} = 1/S
+\end{equation}
+
+\begin{equation}
+w_{s,SW} = \frac{Z(\widehat{EXR}_{s,t+h})}{\sum_{s \in S}Z(\widehat{EXR}_{s,t+h})}
+\end{equation}
+
+\begin{equation}
+w_{s,CW} = \frac{Z(C_{s,t})}{\sum_{s \in S}Z(C_{s,t})}
+\end{equation}
+
+\begin{equation}
+w_{s,CS} = \frac{Z(C_{s,t})Z(\widehat{EXR}_{s,t+h})}{\sum_{s \in S}C(\widehat{EXR}_{s,t})Z(\widehat{EXR}_{s,t+h})}
+\end{equation}
+
+where $Z$ calculates z-score of a variable and $C_{s,t}$ is trading volume. Except for EW, all allocation schemes employed ML returns to determine weights, but neither used risk measures.
+
+\subsubsection{Risk-Parity Portfolios}
+For remaining portfolios, covariance matrix $\Sigma_{t}$ was estimated, considering three options: sample ($\widehat{\Sigma}_{SAM,t}$), PCA ($\widehat{\Sigma}_{PCA,t}$), and Shrinkage ($\widehat{\Sigma}_{S,t}$) toward the constant correlation target matrix. Linear shrinkage intensity followed \citet{ledoitwolf2003, ledoitwolf2004}. In case of $\widehat{\Sigma}_{PCA,t}$, number of factors was set to $log(S)$ \citep{coqueretmilhau2014}.
+
+$\widehat{\Sigma}_{SAM,t}$ is prone to significant estimation error due to high dimensionality, rendering it unstable. Increasing sample size can be detrimental to out-of-sample performance due to parameter shifting, hence making $\widehat{\Sigma}_{PCA,t}$ and $\widehat{\Sigma}_{S,t}$ better alternatives \citep{ledoitwolf2020, coqueretmilhau2014}. This way, at each rebalancing, the sample for estimating ${\Sigma}_{t}$ comprised 720 trading days.
+
+Risk-parity (RP) portfolios frequently outperform optimal mean-variance portfolios in a long-only context, raising their popularity \citep{chavesetal2011}. Given estimated portfolio volatility $\widehat{\sigma}(\mathbf{w_{t}}) = \sqrt{\mathbf{w_{t}}^{T}\widehat{\Sigma_{t}}\mathbf{w_{t}}}$, risk-parity equalizes risk contribution $RC_{s}$ of stock $s$ across S \citep{spinu2013}.
+
+\begin{equation}
+RC_{s,t} = \frac{w_{s,t}(\widehat{\Sigma}_{t}\mathbf{w_{t}})_{s}}{\sqrt{\mathbf{w_{t}^{T}}\widehat{\Sigma_{t}}\mathbf{w_{t}}}} = \frac{1}{S}\widehat{\sigma}(\mathbf{w_{t}})
+\end{equation}
+
+With long-only and full-investment constraints, weights are given by the vanilla convex formulation: 
+
+\begin{equation}
+\argmin_{\mathbf{x_{t}} \geq 0} \frac{1}{2}\mathbf{x_{t}}^{T}\widehat{\Sigma}_{t}\mathbf{x_{t}} - \mathbf{w_{t}}^{T}log(\mathbf{x_{t}})
+\end{equation}
+
+where $\mathbf{x_{t}} = \frac{\mathbf{w_{t}}}{\sqrt{\mathbf{w_{t}^{T}}\widehat{\Sigma_{t}}\mathbf{w_{t}}}}$. 
+
+
+The risk-parity portfolio was computed, one to each $\widehat{\Sigma_{t}}$. While heuristic portfolios don't incorporate risk in setting weights, risk-parity portfolios don't consider ML expected returns, except for investable set formulation.
+
+\subsubsection{Optimal Mean-Tracking Error Portfolios}
+Adapting Modern Portfolio Theory (MPT) framework to relative risk and return inputs gives the following Information Ratio (IR) maximization problem:
+
+\begin{equation}
+\argmax_{\mathbf{w_{t}}} \frac{\mathbf{w_{t}^{T}}\widehat{EXR}_{t+h}}{\sqrt{\mathbf{w_{t}^{T}}\widehat{\Sigma_{t}}\mathbf{w_{t}}}} 
+\end{equation}
+
+This gives the tangency portfolio in Mean Tracking-Error (MTO) domain.
+
+However, an unrestricted MTO\_UNC approach (except for long-only and full-investment constraints) might lead to significant concentration and corner solutions, a recognized limitation of MPT. Additionally, it fails to incorporate many real-life conditions faced by equity managers.
+
+Therefore, a constrained MTO\_CON version was also explored, with box, turnover, and sector constraints chosen to simulate performance under more realistic risk and trading control rules:
+
+\begin{enumerate}
+\item \textbf{Upper Box Constraints:}
+\begin{enumerate}
+    \item Regular stocks:
+\\ $w_{s,t} \leq w_{s,b,t} + 0.03$
+    \item Stocks included only because $w_{s,b,t} \geq 0.03$:
+\\ $w_{s,t} \leq w_{s,b,t} + 0.02$
+    \item Small-caps ($Z(C_{s,t}) \leq Q_{10}(Z(C_{t}))$:
+\\ $w_{s,t} \leq w_{s,b} + 0.025$
+    \item Micro-caps ($Z(C_{s,t}) \leq Q_{3}(Z(C_{t}))$:
+\\ $w_{s,t} \leq w_{s,b,t} + 0.0075$
+\end{enumerate}
+
+\item \textbf{Lower Box Constraints:}
+\begin{enumerate}
+    \item Regular stocks:
+\\ $w_{s,t} \geq max(w_{s,b,t} - 0.02,0)$
+    \item Stocks included only because of $w_{s,b,t} \geq 0.03$, but that belong to bottom forecast quintile:
+\\ $w_{s,t} \geq max(w_{s,b,t} - 0.03,0)$
+\end{enumerate}
+\item \textbf{Turnover Constraints:}
+\begin{enumerate}
+    \item Small-caps:
+\\ $\left| w_{s,t} - w_{s,t-1} \right| \leq 0.015$ 
+    \item Micro-caps:
+\\ $\left| w_{s,t} - w_{s,t-1} \right| \leq 0.005$ 
+
+\end{enumerate}
+\item \textbf{Sector Constraint:}
+\begin{enumerate}
+    \item $ \left| \sum_{s \in Sector S} w_{s,t} - w_{s,b,t} \right| \leq 0.05$
+\end{enumerate}
+\end{enumerate}
+
+Additionally, for stocks with volatility in 95, 97,5 and 99 quantiles, max active weights were multiplied by 0.75, 0.50 or 0, respectively. 
+
+\section{Results}
+In this section, results on ML models' out-of-sample predictive performance and portfolio performance are presented.
+
+\subsection{Expected Returns Model}
+
+Table \ref{summarystats} presents summary statistics for out-of-sample forecasting errors. While OLS exhibited the highest RMSE, ML methods generally yielded superior results due to the introduction of shrinkage and non-linearities. Specifically, E\_A had the lowest RMSE overall, with RF emerging as the best individual performer.
+
+Table \ref{results} presents $R_{OOS}^{2}$, Accuracy, and MAPE. OLS performed poorly in terms of $R_{OOS}^{2}$ and MAPE, with negative value for $R_{OOS}^{2}$, thus aligning with results of \citet{gukellyxiu2020} and \citet{hanauerkalsbach2023}. The introduction of regularization methods and flexible functional forms leads to significant improvement in this metric.
+
+Particularly, ANN showed good performance for the first two architecture choices, declining for ANN3. This also aligns with literature's findings of shallow outperforming deep learning in return prediction \citep{kellyxiu2023}. 
+
+Even simple ensembling methods yielded favorable results, with E\_A displaying best $R^{2}_{OOS}$ overall, making it the preferred choice for portfolios.
+
+Figure \ref{fig: complexity} illustrates hyperparameter choice for each rebalancing. For certain models, like ENET, there was minimal variation, while for others, there was more heterogeneity.
+
+Finally, variable importance plots are displayed in Figure \ref{fig: importance}. Each subfigure represents the relative importance of the 25 most influential variables to that specific method.
+
+Some variables were rather consensual choices among models, such as mom\_res\_12m, assets\_yield, sales\_yield, roe\_3m, net\_mrg\_12m and \\ vol\_12m. 
+
+Particularly, important features for nonlinear models are: mkt\_cap, tobin\_q, turnover\_3m, beta\_mrkt\_36m, curr\_ratio, prc\_highprice\_12m, \\ max\_ret\_1m, book\_ lev and book\_yield. Reversal and Size themes only appeared in non-linear models.
+
+Overall, among 39 most important features, there were 8 in Value (47\%), 6 in Momentum (67\%), 5 in Quality (71\%), 4 in Profitability (44\%), 3 in Low Risk (100\%), 3 in Size (43\%), 3 in Profit Growth (27\%), 2 in Leverage (50\%), 1 in Reversal (33\%), 2 in Macro (50\%), 1 in Investment (25\%) and 1 in Accruals (50\%). Skewness, Seasonality and Sectors had no appearances.  
+
+
+\subsection{ML Portfolios Performance}
+As mentioned, portfolios used E\_A as an expected returns model, due to its superiority in $R^{2}_{OOS}$. At total, 13 portfolio schemes were used: 4 heuristics (EW, CW, CS, SW), 3 RP, 3 MTO\_UNC and 3 MTO\_CON, each using $\widehat{\Sigma}_{SAM, t}$, $\widehat{\Sigma}_{PCA, t}$ or $\widehat{\Sigma}_{S, t}$.
+
+To assess out-of-sample ML performance, three benchmarks were used. The first was the cap-weighted IBOV index, the most prominent Brazilian equities benchmark. 
+
+The other two were constructed from a sample of equity funds: the average fund (FUNDS\_MEAN) and the average Best-in-Class fund (FUNDS\_Q75), the latter comprising funds whose returns ranked in the top quartile during the testing subsample. Even though FUNDS\_Q75 isn't identifiable ex-ante, it serves as a performance reference. 
+
+This sample encompassed 818 domestic and non-exclusive funds. Non-longer active funds were included to mitigate survivorship bias. 
+
+To clarify, results present metrics computed on the average return from the two fund groups, rather than the average of individual funds' metrics.  
+
+Finally, the sample median fee of 2.0\%  was deducted from ML portfolios to make comparisons fair.
+
+Table \ref{absret} indicates that ML portfolios exhibited significantly higher annualized returns compared to all three benchmarks, averaging two to three times the return of FUND\_MEAN and nearly double that of IBOV. While the mean active equity manager underperformed IBOV, Best-in-Class managers outperformed it, albeit unable to surpass any ML portfolio.
+
+Skewness calculations corroborate ML outperformance. While figures were mostly negative, likely influenced by the pandemic, they were less negative than IBOV and active managers, with some even being positive, reflecting a higher proportion of above-median returns.
+
+Conversely, ML portfolios exhibited higher risk, on average, as indicated by standard deviation. However, due to higher returns, they delivered higher risk-adjusted returns, as measured by Sharpe ratios. It's notable that heuristic portfolios yielded higher returns than risk-parity, with the latter mitigating risk accordingly. Additionally, it's worth mentioning that $\widehat{\Sigma}_{t,PCA}$ and $\widehat{\Sigma}_{t,S}$ were associated to increased Sharpe ratios across all frameworks.
+
+Tail measures are crucial in finance, stemming from return distributions that usually deviate from normality and standard deviation's inability to distinguish between upside and downside variation. Following Prospect Theory, investors are actually loss-averse, making downside measures more pertinent. 
+
+Concerning tail risk, Table \ref{downret} displays that RP and MTO portfolios showed less kurtosis than IBOV and FUNDS\_MEAN, but not FUNDS\_Q75, while heuristics showed higher figures. For ETL, ML portfolios showed in-line results with IBOV and FUNDS\_MEAN, but again worse than FUNDS\_Q75. 
+
+Despite exhibiting more downside risk than FUNDS\_Q75, risk-adjusted return measures based on downside risk, such as Sortino and Rachev Ratios, markedly favored ML portfolios when compared to all benchmarks.
+
+Results regarding risk-return trade-off are captured in risk-return scatter-plot of Figure \ref{scatter}. Additionally, box-plots summarising the distribution of ML portfolios and benchmarks are displayed in Figure \ref{box}. 
+
+The discussion between active and passive management is an old topic in finance. With the widespread increase of passive ETFs, the average investor has a very accessible instrument to replicate cap-weighted benchmark. Therefore, for equity managers, it is very important to measure relative performance with the cap-weighted benchmark.
+
+The debate between active and passive management has long been an important topic in finance. With the widespread proliferation of passive ETFs, the average Brazilian investor has an accessible vehicle to replicate cap-weighted benchmark. Consequently, it becomes crucial for equity managers to measure relative performance.
+
+Figure \ref{activecumret} illustrates cumulative net relative performance for ML Portfolios, FUNDS\_MEAN and FUND\_Q75, showing a clear outperformance for the former. On the other hand, Table \ref{relperf} revealed a higher tracking error. Nevertheless, higher level of active returns contributed to favoring ML Portfolios concerning the active risk and return trade-off, as measured by IR.
+
+Despite critics, CAPM remains a useful risk model benchmark in literature. Relatedly to the above, Table \ref{relperf} highlights positive alphas for ML strategies, with t-stats exceeding 2.0 and remarkably above 3.0 or 4.0 for all but MTO\_UNC, thus above \citet{harveyliuzhu2016} threshold. The average manager displayed non-significant CAPM alphas, while Best-in-Class achieved a t-stat of 2.68.
+
+As expected, CW allocation heuristic showed less active risk than other heuristics and MTOs, by factoring in capitalization when setting weights. However, risk-parity schemes yielded even lower tracking error. Finally, it's noticeable the benchmark-risk reduction and IR/T-Stat increase because of MTO\_CON's risk controls. This is also usually true for $\widehat{\Sigma}_{PCA,t}$ and $\widehat{\Sigma}_{S,t}$.
+
+Figure \ref{capture} reveals that benchmark outperformance stemmed from a combination of an upside capture ratio above 1 or even 1.2, along with a downside capture ratio below 1 or even 0.9, resulting in superior performance compared to FUND\_MEAN. In contrast, while downside capture was similar to FUND\_Q75, upside capture was notably better. Hence, although similar in  downside protection, ML strategies demonstrate greater proficiency in capturing higher returns during bull markets.
+
+ML portfolios out-of-sample performance relates to results of \citet{hanauerkalsbach2023} and \citet{gukellyxiu2020}. Nevertheless, despite obvious differences in sample and feature sets, the present work employed benchmark-relative 3-month returns, instead of raw 1-month returns, and also different portfolio-construction schemes. 
+
+\section{Conclusion}
+In this study, various ML methods were employed to forecast market-relative cross-sectional returns over a 3-month horizon. This involved fitting OLS, ENET, RF, XGB and ANN to nearly one hundred signals from the factor zoo literature, covering the most common anomalies and factor themes, and a sample of 1,014 Brazilian stocks spanning 271 months.
+
+
+Contrary to other areas where ML has been successful, financial data exhibit non-stationarity and structural breaks, calling for the adoption of a Walk-Forward validation-scheme. 
+
+Regularized and nonlinear models demonstrated higher predictive performance than OLS, with positive $R^{2}_{OOS}$, being E\_A the most accurate method. Therefore, using its predictions as expected return inputs, diverse long-only portfolio construction methods were applied, encompassing heuristics, risk-parity and MTO.
+
+%HK.
+% Insert two paragraphs explaining contributions and implications of the study for theory and practice or practitioners. (paragraph should be different from the one in the Introduction, and should highlight why the study is different from others.
+
+
+Those exhibited out-of-sample significant alphas and higher risk-adjusted return metrics than the average equity manager, which underperformed the market, and the average return of Best-in-Class managers. While these results don't imply the replacement of humans in stock picking and equity portfolio management, they highlight the importance of systematic ML strategies grounded in asset pricing literature, deserving greater attention from Brazilian investors. Future works can explore possible diversification benefits stemming from combining ML and human skill in equity portfolios.  
+
+
+\bibliographystyle{elsarticle-harv} 
+\bibliography{references.bib}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+\pagebreak
+\begin{appendices}
+
+
+\label{appendices}
+    \section{Tables and Figures}
+
+\begin{table}[t]
+\centering
+\captionsetup{
+  justification=raggedright, % Left-align the caption
+  labelsep=none,
+  singlelinecheck=false, % Allow multi-line captions
+  labelformat=boldlabel, % Use the custom label format
+}
+\renewcommand{\arraystretch}{1.25}
+\caption[Table 1: \footnotesize ]{\footnotesize \\ \textbf{Summary statistics of out-of-sample predictive performance}. This table displays the following summary statistics of out-of-sample errors and model fit: Root Mean Squared Error (RMSE), Mean Absolute Error (MAE), Mean Pseudo-Huber Error (MPHE), Mean Pinball Error (MPE), Mean Absolute Percentage Error (MAPE), and Out-of-Sample $R^2$ (OOS $R^2$). For error metrics, values closer (further away) to (from) zero are in \textbf{bold} (\underline{underlined}). For OOS $R^2$, the highest (lowest) value is in \textbf{bold} (\underline{underlined}).}  
+\label{summarystats} 
+\footnotesize % Reduce font size further
+\begin{tabularx}{\linewidth}{
+  >{\raggedright\arraybackslash}X
+  >{\centering\arraybackslash}X
+  >{\centering\arraybackslash}X
+  >{\centering\arraybackslash}X
+  >{\centering\arraybackslash}X
+  >{\centering\arraybackslash}X
+  >{\centering\arraybackslash}X
+}
+\hline 
+Model & RMSE & MAE & MPHE & MPE & MAPE & OOS $R^2$ \\
+\hline
+OLS & \underline{22.05} & \underline{15.59} & \underline{14.68} & \underline{7.79} & \underline{3.12} & \underline{-0.0103} \\
+ENET & 21.90 & 15.50 & 14.59 & 7.75 & 1.72 & 0.0026 \\
+RF & 21.84 & 15.45 & 14.55 & 7.72 & 1.79 & 0.0088 \\
+XGB & 21.85 & 15.45 & 14.55 & 7.73 & 1.92 & 0.0069 \\
+ANN1 & 21.92 & 15.49 & 14.59 & 7.75 & 2.77 & 0.0011 \\
+ANN2 & \textbf{21.82} & \textbf{15.41} & \textbf{14.50} & \textbf{7.70} & \textbf{1.50} & \textbf{0.0112} \\
+ANN3 & 21.86 & 15.44 & 14.54 & 7.72 & 1.66 & 0.0068 \\
+ENS & 21.91 & 15.53 & 14.63 & 7.77 & 1.83 & 0.0003 \\
+\hline
+\end{tabularx}
+\end{table}
+
+\begin{table}[h]
+\captionsetup{
+  justification=raggedright,
+  labelsep=none,
+  singlelinecheck=false,
+  labelformat=boldlabel,
+}
+\renewcommand{\arraystretch}{1.25}
+\caption[Table 3: \footnotesize ]{\footnotesize \textbf{: Out-of-sample net active summary statistics of the ML Ensemble.} This table reports out-of-sample net active summary statistics for the ML Ensemble portfolios and the human-manager benchmarks. The ML Ensemble averages the return predictions across all ML models (OLS, Elastic Net, Random Forest, XGBoost and three neural networks) before portfolio construction; the ML rows differ only by the portfolio-construction scheme. Annualized Active Geometric Return (Ann. Act. Geom. Ret.), Tracking Error (TE), Information Ratio (IR), Active Expected Shortfall (AES), Active Ulcer Index (Ulcer), Annualized Active Martin Ratio (MR), CAPM alpha ($\alpha$, in percent per month) and its t-statistic ($t(\alpha)$) are displayed. ML portfolio returns are net of transaction costs and of a 1\% p.a. management fee. The human-manager benchmarks come in two forms. FUNDS\_MEAN and FUNDS\_Q75 apply the metrics to a single aggregated return series --- an equally weighted portfolio of, respectively, all funds and the top-quartile funds (ranked by mean return over the evaluation window) --- and therefore embed the diversification of holding many funds at once. MED\_FUND and MED\_FUND\_Q75 instead compute each metric for every fund individually and then report the median across funds, describing the experience of an investor who picks a single (respectively, any or top-quartile) fund; only funds with at least 36 monthly observations in the sample are included. The median (rather than the mean) is used because averaging non-linear ratios across funds is dominated by small-denominator outliers; the reported ratios and $t(\alpha)$ are therefore cross-fund medians of fund-level quantities, not statistics of a tradable portfolio.}
+\footnotesize
+\begin{tabularx}{\linewidth}{>{\raggedright\arraybackslash}m{2.5cm}*{8}{>{\raggedleft\arraybackslash}X}}
+\hline
+Portfolio & Ann. Act. Geom. Ret. & TE & IR & AES & Ulcer & MR & $\alpha$ & $t(\alpha)$ \\
+\hline
+\multicolumn{9}{l}{\textit{ML Ensemble --- average across all ML models}} \\
+RP & 0.039 & 0.068 & 0.58 & 0.034 & 0.052 & 0.76 & 0.448 & 2.70 \\
+RP\_BOX & 0.037 & 0.064 & 0.58 & 0.035 & 0.044 & 0.84 & 0.404 & 2.39 \\
+HRP & 0.025 & 0.069 & 0.36 & 0.036 & 0.059 & 0.42 & 0.324 & 1.88 \\
+CS & 0.028 & 0.082 & 0.34 & 0.041 & 0.079 & 0.35 & 0.389 & 1.97 \\
+SW & 0.032 & 0.093 & 0.35 & 0.044 & 0.076 & 0.43 & 0.465 & 2.11 \\
+EW & 0.032 & 0.094 & 0.34 & 0.046 & 0.074 & 0.43 & 0.452 & 1.95 \\
+MVO & 0.032 & 0.079 & 0.40 & 0.039 & 0.063 & 0.51 & 0.411 & 2.14 \\
+MVO\_BOX & 0.028 & 0.060 & 0.47 & 0.033 & 0.058 & 0.48 & 0.328 & 2.09 \\
+\hline
+\multicolumn{9}{l}{\textit{Benchmarks --- fund portfolios (metric of the average)}} \\
+FUNDS\_MEAN & -0.014 & 0.056 & -0.24 & 0.040 & 0.090 & -0.15 & 0.007 & 0.05 \\
+FUNDS\_Q75 & 0.045 & 0.059 & 0.76 & 0.033 & 0.029 & 1.55 & 0.511 & 3.75 \\
+\hline
+\multicolumn{9}{l}{\textit{Benchmarks --- representative single fund (median across funds)}} \\
+MED\_FUND & -0.020 & 0.097 & -0.27 & 0.062 & 0.153 & -0.15 & -0.071 & -0.33 \\
+MED\_FUND\_Q75 & 0.011 & 0.101 & 0.13 & 0.060 & 0.101 & 0.12 & 0.283 & 1.00 \\
+\hline
+\end{tabularx}
+\label{actret}
+\end{table}
+
+
+\begin{figure}[htbp]
+\centering
+\captionsetup{
+  justification=raggedright,
+  labelsep=none,
+  singlelinecheck=false,
+  labelformat=boldlabel,
+}
+\caption[Figure 9: \footnotesize ]{\footnotesize \textbf{: Cumulative net return: ML Ensemble vs. human managers.} Cumulative wealth index (compounded net monthly returns) over the out-of-sample window for the eight ML Ensemble portfolio-construction schemes (net of transaction costs and a 1\% p.a. management fee), FUNDS\_MEAN, FUNDS\_Q75 and IBOV (dotted, to distinguish it from the dashed band). The dashed band shows the 5th--95th percentile of individual fund wealth paths each month across all funds, illustrating the dispersion of outcomes underlying the FUNDS\_MEAN average. The cohort holds funds alive at the start of the window; a fund leaves the cohort (and the band) once it stops reporting returns.}
+\includegraphics[width=\linewidth]{figures/cumulative_return.png}
+\label{fig:cumret}
+\end{figure}
+
+
+\begin{table}[h]
+\captionsetup{
+  justification=raggedright,
+  labelsep=none,
+  singlelinecheck=false,
+  labelformat=boldlabel,
+}
+\renewcommand{\arraystretch}{1.25}
+\caption[Table 4: \footnotesize ]{\footnotesize \textbf{: Out-of-sample net active summary statistics across ML models.} This table reports out-of-sample net active summary statistics for portfolios built from each individual ML model, under Cross-Sectional (CS) and Risk-Parity (RP) construction. Models are OLS, Elastic Net (GLMNET), Random Forest (RF), XGBoost (XGB) and three neural networks (NN1--NN3). Annualized Active Geometric Return (Ann. Act. Geom. Ret.), Tracking Error (TE), Information Ratio (IR), Active Expected Shortfall (AES), Active Ulcer Index (Ulcer), Annualized Active Martin Ratio (MR), CAPM alpha ($\alpha$, in percent per month) and its t-statistic ($t(\alpha)$) are displayed. Portfolio returns are net of transaction costs and of a 1\% p.a. management fee.}
+\footnotesize
+\begin{tabularx}{\linewidth}{>{\raggedright\arraybackslash}m{2.5cm}*{8}{>{\raggedleft\arraybackslash}X}}
+\hline
+Portfolio & Ann. Act. Geom. Ret. & TE & IR & AES & Ulcer & MR & $\alpha$ & $t(\alpha)$ \\
+\hline
+\multicolumn{9}{l}{\textit{Cross-Sectional weighting (CS)}} \\
+OLS & 0.054 & 0.096 & 0.56 & 0.048 & 0.093 & 0.59 & 0.582 & 2.15 \\
+GLMNET & 0.027 & 0.086 & 0.32 & 0.043 & 0.063 & 0.43 & 0.352 & 1.50 \\
+RF & 0.055 & 0.093 & 0.59 & 0.047 & 0.054 & 1.01 & 0.602 & 2.47 \\
+XGB & 0.064 & 0.083 & 0.77 & 0.039 & 0.035 & 1.82 & 0.640 & 2.82 \\
+NN1 & 0.009 & 0.091 & 0.10 & 0.049 & 0.082 & 0.11 & 0.198 & 0.79 \\
+NN2 & 0.045 & 0.094 & 0.47 & 0.054 & 0.087 & 0.51 & 0.509 & 1.98 \\
+NN3 & 0.036 & 0.094 & 0.38 & 0.045 & 0.053 & 0.68 & 0.455 & 1.83 \\
+\hline
+\multicolumn{9}{l}{\textit{Risk Parity (RP)}} \\
+OLS & 0.064 & 0.090 & 0.72 & 0.047 & 0.068 & 0.94 & 0.667 & 2.78 \\
+GLMNET & 0.047 & 0.076 & 0.62 & 0.039 & 0.041 & 1.16 & 0.501 & 2.47 \\
+RF & 0.068 & 0.088 & 0.78 & 0.045 & 0.044 & 1.56 & 0.693 & 3.00 \\
+XGB & 0.061 & 0.077 & 0.79 & 0.038 & 0.039 & 1.54 & 0.595 & 2.84 \\
+NN1 & 0.034 & 0.080 & 0.43 & 0.045 & 0.052 & 0.66 & 0.401 & 1.85 \\
+NN2 & 0.055 & 0.086 & 0.64 & 0.045 & 0.051 & 1.08 & 0.583 & 2.52 \\
+NN3 & 0.064 & 0.087 & 0.73 & 0.042 & 0.042 & 1.50 & 0.650 & 2.81 \\
+\hline
+\end{tabularx}
+\label{modelret}
+\end{table}
+
+
+\begin{figure}[htbp]
+\centering
+\captionsetup{
+  justification=raggedright,
+  labelsep=none,
+  singlelinecheck=false,
+  labelformat=boldlabel,
+}
+\caption[Figure 8: \footnotesize ]{\footnotesize \textbf{: Selected hyperparameters over time.} Bayesian-tuned hyperparameter values chosen at each walk-forward refit, for every tuned ML model (GLMNET, RF, XGB, NN1--NN3; OLS is untuned and omitted). Hyperparameters that play the same role across models share a panel and are drawn as separate coloured lines: number of trees (RF num.trees, XGB nrounds), maximum tree depth, minimum leaf size (RF min.bucket, XGB min\_child\_weight), learning rate (XGB eta, NN lr), early-stopping iteration and feature subsampling (RF mtry, XGB colsample\_bytree; both fractions of the features sampled). Model-specific hyperparameters keep their own panels, and the three neural networks share each remaining NN panel. Points are the selected values at each refit date; vertical scales differ across panels. Estimated on the individual-signals run.}
+\includegraphics[width=\linewidth]{figures/hyperparameters_over_time.png}
+\label{fig:hyper_time}
+\end{figure}
+
+
+\begin{figure}[htbp]
+\centering
+\captionsetup{
+  justification=raggedright,
+  labelsep=none,
+  singlelinecheck=false,
+  labelformat=boldlabel,
+}
+\caption[Figure 1: \footnotesize ]{\footnotesize \textbf{: Net feature importance by theme across ML models (last period).} Net (signed sum of) normalized feature importance within each signal theme in the final out-of-sample period, for every ML model (OLS, GLMNET, RF, XGB, NN1--NN3). Feature importance is a global OLS surrogate of the model output on the same signals; because signals within a theme are highly correlated their coefficients offset, so importances are summed within each theme to recover the net contribution. Bars are coloured by sign; themes are ordered by overall net importance.}
+\includegraphics[width=\linewidth]{figures/feature_importance_bar.png}
+\label{fig:fi_bar}
+\end{figure}
+
+\begin{figure}[htbp]
+\centering
+\captionsetup{
+  justification=raggedright,
+  labelsep=none,
+  singlelinecheck=false,
+  labelformat=boldlabel,
+}
+\caption[Figure 2: \footnotesize ]{\footnotesize \textbf{: Net feature importance by theme over time across ML models.} Net (signed sum of) normalized feature importance per signal theme at each rebalance date, for every ML model (OLS, GLMNET, RF, XGB, NN1--NN3). Each panel shows one model; colour encodes net importance on a diverging scale centred at zero. Themes are ordered by overall net importance.}
+\includegraphics[width=\linewidth]{figures/feature_importance_heatmap.png}
+\label{fig:fi_heatmap}
+\end{figure}
+
+
+\begin{figure}[htbp]
+\centering
+\captionsetup{
+  justification=raggedright,
+  labelsep=none,
+  singlelinecheck=false,
+  labelformat=boldlabel,
+}
+\caption[Figure 6: \footnotesize ]{\footnotesize \textbf{: Hierarchical feature-importance decomposition.} Decomposition of feature importance from the individual signals through the base learners (OLS, GLMNET, RF, XGB, NN1--NN3) to the meta learner (the ML Ensemble). Nodes are signals, base learners and the meta learner; edge width and colour encode the importance each signal contributes to a base learner, and each base learner to the meta learner. Only the 10 most important signals per learner are shown. Estimated on the individual-signals run.}
+\includegraphics[width=\linewidth]{figures/hierarchical_feature_importance.png}
+\label{fig:hier_fi}
+\end{figure}
+
+
+\begin{figure}[htbp]
+\centering
+\captionsetup{
+  justification=raggedright,
+  labelsep=none,
+  singlelinecheck=false,
+  labelformat=boldlabel,
+}
+\caption[Figure 7: \footnotesize ]{\footnotesize \textbf{: Linear explainability of each ML model's predictions.} For each ML model (OLS, GLMNET, RF, XGB, NN1--NN3), the out-of-sample predictions are regressed on the signals (each cross-sectionally scaled to $[-1, 1]$ that month, hence approximately mean-zero) via the OLS global surrogate model. \emph{Left (intercept):} because the scaled signals are centred, the intercept is approximately the mean of the model's predictions -- its baseline predicted active return for a characteristic-neutral (median) stock. It captures the unconditional level of predicted active returns and also absorbs any level shift induced by the model's curvature (since it equals the average prediction, $\mathrm{E}[f(x)]$, not the prediction at the average, $f(\mathrm{E}[x])$); it is a common shift across stocks and does not affect the cross-sectional ranking. \emph{Centre (}$R^2$\emph{):} the share of prediction variance that is linear in the signals -- values near one indicate an essentially linear model. \emph{Right (residual variance):} the variance of the surrogate residuals, i.e. the part of the predictions the linear surrogate cannot reproduce. Together, $1 - R^2$ and the residual variance measure the nonlinearity and interaction structure the ML model captures beyond a linear function of the signals; both are near zero for the linear models (OLS, GLMNET) and larger for the tree and neural-network models. Values are for the final-refit surrogate on the individual-signals run.}
+\includegraphics[width=\linewidth]{figures/surrogate_fit.png}
+\label{fig:surrogate_fit}
+\end{figure}
+
+
+\begin{figure}[htbp]
+\centering
+\captionsetup{
+  justification=raggedright,
+  labelsep=none,
+  singlelinecheck=false,
+  labelformat=boldlabel,
+}
+\caption[Figure 5: \footnotesize ]{\footnotesize \textbf{: Average portfolio characteristics over time.} Weighted-average stock characteristics of each ML-ensemble portfolio (sum of end-of-period portfolio weights times the characteristic) at every rebalance date. Each panel is one characteristic: Sharpe ratio (12m), earnings yield (NI/ME), return on equity (12m), gross profitability (GP/AT), dividend yield (36m median), return volatility (12m), log market capitalization, quality minus junk (QMJ) and the three-year change in FCF/BE. Each line is one portfolio-construction scheme (RP, RP\_BOX, HRP, CS, SW, EW, MVO, MVO\_BOX); the dashed black line is the IBOV benchmark's weighted average. Vertical scales differ across panels.}
+\includegraphics[width=\linewidth]{figures/portfolio_characteristics.png}
+\label{fig:port_char}
+\end{figure}
+
+
+\begin{figure}[htbp]
+\centering
+\captionsetup{
+  justification=raggedright,
+  labelsep=none,
+  singlelinecheck=false,
+  labelformat=boldlabel,
+}
+\caption[Figure 3: \footnotesize ]{\footnotesize \textbf{: Portfolio weight composition by sector.} Out-of-sample monthly composition of portfolio weight across economic sectors, for each ML-ensemble portfolio-construction scheme (RP, RP\_BOX, HRP, CS, SW, EW, MVO, MVO\_BOX) and the IBOV benchmark. Each panel stacks the sum of portfolio weights within each sector to 100\% at every rebalance date.}
+\includegraphics[width=\linewidth]{figures/composition_sector_weight.png}
+\label{fig:comp_sector}
+\end{figure}
+
+\begin{figure}[htbp]
+\centering
+\captionsetup{
+  justification=raggedright,
+  labelsep=none,
+  singlelinecheck=false,
+  labelformat=boldlabel,
+}
+\caption[Figure 4: \footnotesize ]{\footnotesize \textbf{: Portfolio weight composition by market capitalization.} Out-of-sample monthly composition of portfolio weight across market-capitalization classes (mega, large, mid, small and micro caps), for each ML-ensemble portfolio-construction scheme and the IBOV benchmark. Each panel stacks the sum of portfolio weights within each size class to 100\% at every rebalance date.}
+\includegraphics[width=\linewidth]{figures/composition_liquidity_weight.png}
+\label{fig:comp_mktcap}
+\end{figure}
+
+
+\begin{table}[h]
+\captionsetup{
+  justification=raggedright,
+  labelsep=none,
+  singlelinecheck=false,
+  labelformat=boldlabel,
+}
+\renewcommand{\arraystretch}{1.2}
+\caption[Table 5: \footnotesize ]{\footnotesize \textbf{: Long-only factor attribution of portfolio returns.} Each portfolio's monthly excess return over the CDI is regressed on a market factor and five market-neutralized style factors built from long-only cap-scaled signal portfolios: MKT is the benchmark (IBOV) excess return over CDI, and HML (be\_me), MOM (prc\_ret\_12m\_1m), RMW (gp\_at\_12m), SMB (log\_mkt\_cap) and CMA (assets\_gr1y\_tr) are each the long-only signal portfolio minus the benchmark (an active/tilt return). This is a returns-based style attribution, not a risk-premium test: loadings are style tilts and $\alpha$ (percent per month) is the active return unexplained by the basis. The factor portfolios are measured 15th-to-15th while the fund panel is calendar-month, so MKT is estimated with the Dimson (1979) correction: the regression includes the lead, contemporaneous and lagged market factor and the reported loading is their sum, with the t-statistic of that linear combination. Without it the non-synchronicity attenuates the fund market betas by roughly half. The correction is applied uniformly to all rows; for the synchronized ML portfolios the lead and lag terms are near zero. Estimates are shown with t-statistics in parentheses; $R^2$ is the regression fit. MED\_FUND and MED\_FUND\_Q75 regress each fund individually and report the median loading across (all / top-quartile) funds.}
+\scriptsize
+\setlength{\tabcolsep}{3pt}
+\begin{tabularx}{\linewidth}{>{\raggedright\arraybackslash}m{1.6cm}*{8}{>{\raggedleft\arraybackslash}X}}
+\hline
+Portfolio & $\alpha$ & MKT & HML & MOM & RMW & SMB & CMA & $R^2$ \\
+\hline
+\multicolumn{9}{l}{\textit{ML Ensemble}} \\
+RP & 0.393 & 0.88 & -0.03 & 0.09 & 0.21 & 0.07 & -0.07 & 0.96 \\
+ & (2.77) & (23.47) & (-0.49) & (1.68) & (3.92) & (1.60) & (-0.94) & \\
+RP\_BOX & 0.326 & 0.92 & -0.01 & 0.15 & 0.22 & 0.06 & -0.04 & 0.97 \\
+ & (2.51) & (26.80) & (-0.29) & (3.27) & (4.34) & (1.44) & (-0.68) & \\
+HRP & 0.273 & 0.89 & -0.01 & 0.06 & 0.23 & 0.04 & -0.02 & 0.95 \\
+ & (1.77) & (21.87) & (-0.21) & (1.00) & (3.97) & (0.88) & (-0.31) & \\
+CS & 0.329 & 0.87 & -0.05 & 0.10 & 0.21 & 0.13 & -0.15 & 0.94 \\
+ & (1.91) & (19.09) & (-0.79) & (1.59) & (3.19) & (2.45) & (-1.78) & \\
+SW & 0.368 & 0.85 & -0.06 & 0.14 & 0.30 & 0.11 & -0.12 & 0.94 \\
+ & (2.13) & (18.59) & (-0.81) & (2.30) & (4.49) & (2.01) & (-1.34) & \\
+EW & 0.358 & 0.85 & -0.06 & 0.17 & 0.31 & 0.12 & -0.10 & 0.94 \\
+ & (2.07) & (18.62) & (-0.85) & (2.65) & (4.58) & (2.28) & (-1.19) & \\
+MVO & 0.354 & 0.86 & -0.05 & 0.10 & 0.21 & 0.11 & -0.05 & 0.95 \\
+ & (2.25) & (20.65) & (-0.79) & (1.72) & (3.49) & (2.25) & (-0.60) & \\
+MVO\_BOX & 0.277 & 0.92 & -0.08 & 0.19 & 0.10 & 0.10 & -0.08 & 0.97 \\
+ & (2.10) & (26.44) & (-1.50) & (4.03) & (1.92) & (2.33) & (-1.20) & \\
+\hline
+\multicolumn{9}{l}{\textit{Benchmarks --- fund portfolios}} \\
+FUNDS\_MEAN & -0.166 & 0.87 & 0.09 & 0.12 & -0.02 & 0.03 & -0.23 & 0.64 \\
+ & (-0.41) & (8.13) & (0.59) & (0.85) & (-0.13) & (0.23) & (-1.12) & \\
+FUNDS\_Q75 & 0.284 & 0.82 & 0.13 & 0.11 & -0.05 & 0.02 & -0.23 & 0.64 \\
+ & (0.72) & (7.84) & (0.85) & (0.77) & (-0.34) & (0.16) & (-1.19) & \\
+\multicolumn{9}{l}{\textit{Benchmarks --- representative single fund (median across funds)}} \\
+MED\_FUND & -0.294 & 1.01 & 0.18 & 0.13 & -0.09 & 0.01 & -0.30 & 0.61 \\
+ & (-0.50) & (6.40) & (0.80) & (0.60) & (-0.38) & (0.05) & (-1.05) & \\
+MED\_FUND\_Q75 & 0.116 & 0.91 & 0.09 & 0.10 & -0.05 & 0.03 & -0.22 & 0.60 \\
+ & (0.20) & (6.06) & (0.45) & (0.41) & (-0.22) & (0.17) & (-0.82) & \\
+\hline
+\end{tabularx}
+\label{factorattr}
+\end{table}
+
+
+\begin{figure}[htbp]
+\centering
+\captionsetup{
+  justification=raggedright,
+  labelsep=none,
+  singlelinecheck=false,
+  labelformat=boldlabel,
+}
+\caption[Figure 10: \footnotesize ]{\footnotesize \textbf{: Agreement across base-learner predictions.} Pairwise correlation of the out-of-sample return predictions of the seven base learners (OLS, GLMNET, RF, XGB, NN1--NN3). Correlations are computed cross-sectionally within each month and then averaged over months, so they measure whether the models rank the same stocks alike rather than sharing a common time-series level. Lower correlations indicate more independent signals and hence more scope for the ensemble to add value.}
+\includegraphics[width=\linewidth]{figures/correlogram_predictions.png}
+\label{fig:corr_pred}
+\end{figure}
+
+\begin{figure}[htbp]
+\centering
+\captionsetup{
+  justification=raggedright,
+  labelsep=none,
+  singlelinecheck=false,
+  labelformat=boldlabel,
+}
+\caption[Figure 11: \footnotesize ]{\footnotesize \textbf{: Active return correlation: ML Ensemble portfolios vs human managers.} Monthly active return correlations (each series measured net of IBOV) among the eight ML Ensemble portfolio-construction schemes and the human-manager benchmarks FUNDS\_MEAN and FUNDS\_Q75. Active rather than raw returns are shown because the common market exposure of long-only portfolios mechanically pushes every raw-return pair toward one. Each series is differenced against IBOV measured on its own return convention -- 15th-to-15th for the ML backtest, calendar-month for the fund panel -- since mixing the two would inject roughly half a month of market noise into the fund active returns and bias these correlations toward zero. AVG\_FUND is not a return series: each of its entries is the average of that portfolio's correlations with the individual funds (funds with at least 36 monthly observations), and its diagonal entry is the average pairwise correlation among the funds themselves, so it is not equal to one. Lower ML-versus-fund correlations indicate greater diversification potential from combining machine and human portfolios.}
+\includegraphics[width=\linewidth]{figures/correlogram_performance.png}
+\label{fig:corr_perf}
+\end{figure}
+
+
+\begin{table}[h]
+\captionsetup{
+  justification=raggedright,
+  labelsep=none,
+  singlelinecheck=false,
+  labelformat=boldlabel,
+}
+\renewcommand{\arraystretch}{1.25}
+\caption[Table 6: \footnotesize ]{\footnotesize \textbf{: Man-and-machine combination frontier.} Each row combines one ML Ensemble portfolio with one human-manager benchmark, rebalanced monthly to constant weights $w$ in the ML portfolio and $1-w$ in the manager, over a grid $w \in \{0, 0.05, \ldots, 1\}$. Because the two-asset weight space is one-dimensional, the frontier is traced with a deterministic grid rather than random draws. Sharpe ratios are annualized and computed on returns in excess of the CDI; Information Ratios are annualized and computed on returns active against IBOV. For each metric the table reports the pure-manager value ($w = 0$), the pure-ML value ($w = 1$), the best value attained on the grid, and the weight $w^{*}$ that attains it. An interior $w^{*}$ indicates a diversification gain from combining machine and human portfolios. Four manager archetypes are considered: a portfolio diversified across all funds (FUNDS\_MEAN) or across top-quartile funds (FUNDS\_Q75), and a single fund drawn either from the whole universe or from the top quartile, the latter representing an exceptional fund picker. For the single-fund rows, metrics are computed for the combination with each fund individually and the median across funds is reported; averaging the combined returns across funds would instead collapse exactly to the FUNDS\_MEAN combination. When a fund has closed or has not yet launched, that month is held entirely in the ML portfolio, so each combination is a continuously invested path.}
+\scriptsize
+\setlength{\tabcolsep}{3pt}
+\begin{tabularx}{\linewidth}{>{\raggedright\arraybackslash}m{1.4cm}>{\raggedright\arraybackslash}m{2.4cm}*{8}{>{\raggedleft\arraybackslash}X}}
+\hline
+& & \multicolumn{4}{c}{Sharpe ratio} & \multicolumn{4}{c}{Information ratio} \\
+Portfolio & Manager & Human & ML & Best & $w^{*}$ & Human & ML & Best & $w^{*}$ \\
+\hline
+RP & FUNDS\_MEAN & 0.22 & 0.45 & 0.45 & 100\% & -0.33 & 0.49 & 0.49 & 100\% \\
+RP & FUNDS\_Q75 & 0.51 & 0.45 & 0.54 & 35\% & 0.63 & 0.49 & 0.68 & 35\% \\
+RP & Single fund (median) & 0.25 & 0.45 & 0.45 & 100\% & -0.10 & 0.49 & 0.49 & 100\% \\
+RP & Single top-quartile fund (median) & 0.37 & 0.45 & 0.47 & 70\% & 0.19 & 0.49 & 0.49 & 95\% \\
+RP\_BOX & FUNDS\_MEAN & 0.22 & 0.44 & 0.44 & 100\% & -0.33 & 0.51 & 0.51 & 100\% \\
+RP\_BOX & FUNDS\_Q75 & 0.51 & 0.44 & 0.53 & 30\% & 0.63 & 0.51 & 0.68 & 35\% \\
+RP\_BOX & Single fund (median) & 0.25 & 0.44 & 0.44 & 100\% & -0.08 & 0.51 & 0.51 & 100\% \\
+RP\_BOX & Single top-quartile fund (median) & 0.37 & 0.44 & 0.45 & 65\% & 0.18 & 0.51 & 0.51 & 100\% \\
+HRP & FUNDS\_MEAN & 0.22 & 0.39 & 0.39 & 100\% & -0.33 & 0.28 & 0.28 & 100\% \\
+HRP & FUNDS\_Q75 & 0.51 & 0.39 & 0.52 & 20\% & 0.63 & 0.28 & 0.63 & 5\% \\
+HRP & Single fund (median) & 0.23 & 0.39 & 0.39 & 100\% & -0.13 & 0.28 & 0.28 & 100\% \\
+HRP & Single top-quartile fund (median) & 0.36 & 0.39 & 0.41 & 60\% & 0.15 & 0.28 & 0.28 & 85\% \\
+CS & FUNDS\_MEAN & 0.22 & 0.41 & 0.41 & 100\% & -0.33 & 0.25 & 0.25 & 100\% \\
+CS & FUNDS\_Q75 & 0.51 & 0.41 & 0.53 & 25\% & 0.63 & 0.25 & 0.63 & 0\% \\
+CS & Single fund (median) & 0.22 & 0.41 & 0.41 & 100\% & -0.17 & 0.25 & 0.25 & 100\% \\
+CS & Single top-quartile fund (median) & 0.37 & 0.41 & 0.43 & 60\% & 0.18 & 0.25 & 0.27 & 65\% \\
+SW & FUNDS\_MEAN & 0.22 & 0.44 & 0.44 & 100\% & -0.33 & 0.26 & 0.26 & 100\% \\
+SW & FUNDS\_Q75 & 0.51 & 0.44 & 0.54 & 35\% & 0.63 & 0.26 & 0.63 & 0\% \\
+SW & Single fund (median) & 0.23 & 0.44 & 0.44 & 100\% & -0.14 & 0.26 & 0.26 & 100\% \\
+SW & Single top-quartile fund (median) & 0.37 & 0.44 & 0.46 & 70\% & 0.18 & 0.26 & 0.27 & 70\% \\
+EW & FUNDS\_MEAN & 0.22 & 0.43 & 0.43 & 100\% & -0.33 & 0.26 & 0.26 & 100\% \\
+EW & FUNDS\_Q75 & 0.51 & 0.43 & 0.54 & 30\% & 0.63 & 0.26 & 0.63 & 0\% \\
+EW & Single fund (median) & 0.23 & 0.43 & 0.43 & 100\% & -0.13 & 0.26 & 0.26 & 100\% \\
+EW & Single top-quartile fund (median) & 0.37 & 0.43 & 0.45 & 65\% & 0.16 & 0.26 & 0.27 & 75\% \\
+MVO & FUNDS\_MEAN & 0.22 & 0.42 & 0.42 & 100\% & -0.33 & 0.32 & 0.32 & 100\% \\
+MVO & FUNDS\_Q75 & 0.51 & 0.42 & 0.53 & 30\% & 0.63 & 0.32 & 0.63 & 5\% \\
+MVO & Single fund (median) & 0.24 & 0.42 & 0.42 & 100\% & -0.14 & 0.32 & 0.32 & 100\% \\
+MVO & Single top-quartile fund (median) & 0.37 & 0.42 & 0.44 & 70\% & 0.17 & 0.32 & 0.33 & 80\% \\
+MVO\_BOX & FUNDS\_MEAN & 0.22 & 0.40 & 0.40 & 100\% & -0.33 & 0.40 & 0.40 & 100\% \\
+MVO\_BOX & FUNDS\_Q75 & 0.51 & 0.40 & 0.52 & 20\% & 0.63 & 0.40 & 0.65 & 25\% \\
+MVO\_BOX & Single fund (median) & 0.23 & 0.40 & 0.40 & 100\% & -0.16 & 0.40 & 0.40 & 100\% \\
+MVO\_BOX & Single top-quartile fund (median) & 0.37 & 0.40 & 0.42 & 60\% & 0.18 & 0.40 & 0.40 & 90\% \\
+\hline
+\end{tabularx}
+\label{combofront}
+\end{table}
+
+
+\begin{figure}[htbp]
+\centering
+\captionsetup{
+  justification=raggedright,
+  labelsep=none,
+  singlelinecheck=false,
+  labelformat=boldlabel,
+}
+\caption[Figure 12: \footnotesize ]{\footnotesize \textbf{: Man and machine: active risk-return frontier.} Annualized active return against annualized active risk (tracking error), both measured against IBOV, for portfolios holding a weight $w$ in an ML Ensemble portfolio and $1-w$ in a human manager, rebalanced monthly to constant weights over the grid $w \in \{0, 0.05, \ldots, 1\}$. Each curve is one ML portfolio-construction scheme. The four panels are four manager archetypes: the top row holds a portfolio diversified across funds (all funds, FUNDS\_MEAN; top-quartile funds, FUNDS\_Q75), while the bottom row holds a single fund -- either a fund drawn from the whole universe, or a top-quartile fund, the latter representing an investor who is an exceptional fund picker. Squares mark the pure-manager portfolio ($w = 0$), triangles the standalone ML portfolios ($w = 1$) and diamonds the weight attaining the highest Information Ratio. Each leg's active return is measured against IBOV on its own return convention (15th-to-15th for the ML backtest, calendar-month for the funds), and the combination's active return is the weighted average of the two, so no return is differenced against a mismatched benchmark. Because active return and active risk are annualized consistently, the Information Ratio is the slope of a ray from the origin, so curves bowing above the straight line joining their endpoints represent a genuine diversification gain from combining machine and human portfolios. In the single-fund panels the combination is formed with each fund separately and the median across funds is plotted. When a fund has closed or has not yet launched the investor cannot hold it, so that month is held entirely in the ML portfolio; every combination is therefore a continuously invested path over the full window.}
+\includegraphics[width=\linewidth]{figures/combination_frontier.png}
+\label{fig:combo_frontier}
+\end{figure}
+
+
+
+
+
+
+
+
+\newpage
+
+  
+\label{vardefinitions}   
+      \vspace{1em} % Add some vertical space if needed
+\begin{table}[pt]
+\captionsetup{
+  justification=raggedright, % Left-align the caption
+  labelsep=none,
+  singlelinecheck=false, % Allow multi-line captions
+  labelformat=boldlabel, % Use the custom label format
+}
+\renewcommand{\arraystretch}{1.25}
+\caption[Table 1: \footnotesize ]{\footnotesize \\ \textbf{Variables Definitions - Part 1}. This table shows predictors, their respective theme and related study.}  
+\footnotesize % Reduce font size further
+\begin{tabularx}{\linewidth}{>{\raggedright\arraybackslash}m{3cm}>{\raggedright\arraybackslash}m{3.5cm}>{\raggedright\arraybackslash}m{4cm}>{\raggedright\arraybackslash}m{4cm}}
+\hline
+\multirow{2}{*}{Definition} & \multirow{2}{*}{Name} & \multirow{2}{*}{Citation} & \multirow{2}{*}{Cluster} \\
+& & & \\
+\hline
+6m Acceleration & $acceleration\_6m$ & Gettleman and Marks (2006) & Momentum \\
+6m Alpha & $alpha\_6m$ & Hünh and Scholz (2018) & Momentum \\
+12m Alpha & $alpha\_12m$ & As above & Momentum \\
+Asset Growth & $assets\_gr3y$ & Cooper et al. (2008) & Investment  \\
+Asset Turnover & $asset\_turnover\_12m$ & Haugen and Baker (1996) & Quality \\
+Assets Yield & $assets\_yield$ & Fama and French (1992) & Value \\
+Book Growth & $be\_gr3y$ & Richardson et al. (2005) & Investment \\
+Book Leverage & $book\_lev$ & Fama and French (1992) & Leverage \\
+Beta - Market & $beta\_mrkt\_36m$ & Fama and MacBeth (1973) & Low Risk \\
+Book Yield & $book\_yield$ & Rosenberg et al. (1985) & Value \\
+CAPEX Growth & $capex\_gr3y$ & Anderson and Garcia-Feijoo (2006) & Investment \\
+Cash Flow Margin & $cf\_mrg\_12m$ & Huang (2009) & Profitability \\
+Cash Flow Volatility & $cf\_mrg\_12m\_sd\_3y$ &  As above & Quality \\
+Commodities Price Surprise\footnote{} & $commodities\_sur\_3y$ & Brooks et al. (2016) & Macro \\
+Correlation - Market & $corr\_mrkt\_36m$ & Asness et al. (2020) & Low Risk \\
+Current Ratio & $curr\_ratio$ & Ou and Penman (1989) & Quality \\
+Debt-to-Market Equity & $debt.me$ & Penman et al. (2007) & Leverage \\
+Dividend Yield & $dps\_yield$ & Litzenberger and Ramaswamy (1982) & Value \\
+Dividend Stability & $dy\_med\_36m$ & Owain et al. (2000) & Value \\
+Dividend Growth & $dps\_12m\_gr3y$ & Maio and Santa-Clara (2015)  & Profit Growth \\
+\hline
+\end{tabularx}
+\label{mostcitedarticles}
+\end{table}
+
+      \vspace{1em} % Add some vertical space if needed
+\begin{table}[pt]
+\captionsetup{
+  justification=raggedright, % Left-align the caption
+  labelsep=none,
+  singlelinecheck=false, % Allow multi-line captions
+  labelformat=boldlabel, % Use the custom label format
+}
+\renewcommand{\arraystretch}{1.25}
+\caption[Table 1: \footnotesize ]{\footnotesize \\ \textbf{Variables Definitions - Part 2}. This table shows predictors, their respective theme and related study.}  
+\footnotesize % Reduce font size further
+\begin{tabularx}{\linewidth}{>{\raggedright\arraybackslash}m{3cm}>{\raggedright\arraybackslash}m{3.5cm}>{\raggedright\arraybackslash}m{4cm}>{\raggedright\arraybackslash}m{4cm}}
+\hline
+\multirow{2}{*}{Definition} & \multirow{2}{*}{Name} & \multirow{2}{*}{Citation} & \multirow{2}{*}{Cluster} \\
+& & & \\
+\hline
+Dividend Surprise & $dps\_12m\_sur3y$ & Guo et al. (2023) & Profit Growth \\
+EBITDA Yield & $ebitda\_yield$ & Loughran and Wellman (2011) & Value\\
+Earnings Yield & $eps\_yield$ & Basu (1983) & Value\\
+Earnings Growth & $eps\_12m\_gr3y$ & Asness et al. (2018) & Profit Growth\\
+Earnings Surprise & $eps\_12m\_sur3y$ & Foster et al. (1984) & Profit Growth\\
+Equity Ney-Payout & $eqnpo\_12m$ & Daniel and Titman (2006) & Value \\
+Fixed Costs to Sales & $fixed\_costs.sales$ & Gorodnichenko and Weber (2016) & Leverage \\
+Free-Cash Flow to Invested Capital & $fcf.invcap\_12m$ & Bouchard et al. (2019) & Profitability \\
+Free Cash-Flow to Invested Capital Growth & $fcf.invcap\_12m\_gr3y$ &  Bouchard et al. (2019) & Profit Growth \\
+Free-Cash Flow Yield & $fcf.yield$ & Lakonishok et al. (1994) & Value \\
+Free-Cash Flow Growth & $fcfps\_12m\_gr3y$ & Jansen (2021) & Profit Growth \\
+Free-Cash Flow Surprise & $fcfps\_12m\_sur3y$ &  Mao and Wei (2016) & Profit Growth \\
+Free-Cash Flow to Equity to Book & $fcfe.be\_12m$ & Bouchard et al. (2019) & Profitability \\
+Free-Cash Flow to Equity Yield & $fcfe\_yield$ & Lakonishok et al. (1994) & Value \\
+Free-Cash Flow to Firm Yield & $fcff\_yield$ &  As above & Value \\
+F-Score & $fscore$ & Piotroski (2000) & Quality \\
+Gross Profits to Assets & $gp.at\_12m$ & Novy-Marx (2013) & Profitability \\
+Idiosyncratic Volatility & $idio\_vol\_mrkt\_ewma$ & Ali et al. (2013) & Profitability \\
+\hline
+\end{tabularx}
+\label{mostcitedarticles}
+\end{table}
+
+      \vspace{1em} % Add some vertical space if needed
+\begin{table}[pt]
+\captionsetup{
+  justification=raggedright, % Left-align the caption
+  labelsep=none,
+  singlelinecheck=false, % Allow multi-line captions
+  labelformat=boldlabel, % Use the custom label format
+}
+\renewcommand{\arraystretch}{1.25}
+\caption[Table 1: \footnotesize ]{\footnotesize \\ \textbf{Variables Definitions - Part 3}. This table shows predictors, their respective theme and related study.}  
+\footnotesize % Reduce font size further
+\begin{tabularx}{\linewidth}{>{\raggedright\arraybackslash}m{3cm}>{\raggedright\arraybackslash}m{3.5cm}>{\raggedright\arraybackslash}m{4cm}>{\raggedright\arraybackslash}m{4cm}}
+\hline
+\multirow{2}{*}{Definition} & \multirow{2}{*}{Name} & \multirow{2}{*}{Citation} & \multirow{2}{*}{Cluster} \\
+& & & \\
+\hline
+Illiquidity & $mean\_volfin\_3m$ & Dino (2023) & Size \\
+Interest Rate Differential Surprise & $rate\_diff\_sur5y$ & Lioui and Maio (2014)  & Macro \\
+Interest Rate Surprise & $realrate\_sur5y$ &  As above & Macro \\
+Long-term Reversal & $ret\_60m\_l1y$ & DeBondt and Thaler (1985) & Reversal \\
+Market Cap & $mkt\_cap$ & Banz (1981) & Size \\
+Max Return 1m & $max\_ret\_1m$ & Bali et al. (2011) & Momentum \\   
+Monthly Inflation Surprise & $ipca\_monthly\_sur\_5y$ & Duarte (2013) & Macro \\
+Net Margin & $net\_mrg\_12m$ & Soliman (2008) & Profitability \\
+Net Margin Growth & $net\_mrg\_12m\_gr3y$ & Asness et al. (2018) & Profit Growth \\
+Net Margin Volatility & $net\_mrg\_12m\_sd\_3y$ & Francis et al. (2004) & Quality \\
+Net Operating Assets Growth  & $noa\_gr3y$ & Richardson et al. (2005) & Investment \\
+Net Operating Assets to Assets & $noa.at$ & Hirschleifer et al. (2004) & Accruals \\
+Operating Accruals & $oaccruals.at$ & Sloan (1996) & Accruals \\
+Operating Cash-Flow Yield & $ocf\_yield$ & Lakonishok et al. (1994) & Value \\
+Operating Cash-Flow to Assets & $ocf\_at\_12m$ &  Bouchard et al. (2019) & Profitability \\
+Operating Leverage & $ope\_lev$ & Novy-Marx (2013) & Quality \\
+Payout & $payout\_12m$ & Asness et al. (2018) & Quality \\
+\hline
+\end{tabularx}
+\label{mostcitedarticles}
+\end{table}
+
+      \vspace{1em} % Add some vertical space if needed
+\begin{table}[pt]
+\captionsetup{
+  justification=raggedright, % Left-align the caption
+  labelsep=none,
+  singlelinecheck=false, % Allow multi-line captions
+  labelformat=boldlabel, % Use the custom label format
+}
+\renewcommand{\arraystretch}{1.25}
+\caption[Table 1: \footnotesize ]{\footnotesize \\ \textbf{Variables Definitions - Part 4}. This table shows predictors, their respective theme and related study.}  
+\footnotesize % Reduce font size further
+\begin{tabularx}{\linewidth}{>{\raggedright\arraybackslash}m{3cm}>{\raggedright\arraybackslash}m{3.5cm}>{\raggedright\arraybackslash}m{4cm}>{\raggedright\arraybackslash}m{4cm}}
+\hline
+\multirow{2}{*}{Definition} & \multirow{2}{*}{Name} & \multirow{2}{*}{Citation} & \multirow{2}{*}{Cluster} \\
+& & & \\
+\hline
+Price to Max Price 12m & $prc\_highprice\_12m$ & George and Hwang (2004)  & Reversal \\
+Residual Momentum & $mom\_res\_12m$ & Blitz, Huij and Martens (2011) & Momentum \\
+Return on Equity & $roe\_12m$ & Haugen and Baker (1996)  & Profitability \\
+Return on Equity - Quarterly & $roe\_3m$ & As above & 
+Profitability \\
+Return on Equity Growth & $roe\_12m\_gr3y$ & Asness et al. & Profit Growth \\
+Return on Equity - Volatility & $roe\_12m\_sd\_3y$ & Francis et al. (2004) & 
+Profitability \\
+Sales Yield & $sales\_yield$ & Barbee et al. (1996) & Value \\
+Sales Growth & $sps\_12m\_gr3y$ & Abarbanell and Bushee (1998) & Profit Growth \\
+Sales Surprise & $sps\_12m\_sur\_3y$ & Jegadeesh and Livnat (2006) & Profit Growth \\
+Seasonality Years 1-7 & $seas\_1\_7$ & Heston and Sadka (2008) & Seasonality \\
+Seasonality Years 2-5 & $seas\_2\_5$ & As above & Seasonality \\
+Sector Book Yield & $book\_yield\_sector$ & Asness et al. (2000) & Value \\
+Sector-Adjusted Book Yield & $book\_yield\_within$ & As above & Value  \\
+Sector Dummies & $'sector\_name'$ & Gu et al. (2020) & Sector \\
+Sector Operating Cash-Flow Yield & $ocf\_yield\_sector$ & Asness et al. (2000) & Value \\
+Sector-Adjusted Operating Cash-Flow Yield & $ocf\_yield\_within$ & As above & Value \\
+\hline
+\end{tabularx}
+\label{mostcitedarticles}
+\end{table}
+
+
+
+      \vspace{1em} % Add some vertical space if needed
+\begin{table}[pt]
+\captionsetup{
+  justification=raggedright, % Left-align the caption
+  labelsep=none,
+  singlelinecheck=false, % Allow multi-line captions
+  labelformat=boldlabel, % Use the custom label format
+}
+\renewcommand{\arraystretch}{1.25}
+\caption[Table 1: \footnotesize ]{\footnotesize \\ \textbf{Variables Definitions - Part 5}. This table shows predictors, their respective theme and related study.}  
+\footnotesize % Reduce font size further
+\begin{tabularx}{\linewidth}{>{\raggedright\arraybackslash}m{3cm}>{\raggedright\arraybackslash}m{3.5cm}>{\raggedright\arraybackslash}m{4cm}>{\raggedright\arraybackslash}m{4cm}}
+\hline
+\multirow{2}{*}{Definition} & \multirow{2}{*}{Name} & \multirow{2}{*}{Citation} & \multirow{2}{*}{Cluster} \\
+& & & \\
+\hline
+
+Sector-Adjusted Size & $size\_within$ & Asness et al. (2000) & Size \\
+Sector Sharpe 6m & $sharpe\_6m\_sector$ & Moskowitz and Grinblatt (1999) & Momentum \\
+Sharpe 12m & $sharpe\_12m$ & Daniel and Moskowitz (2016) & Momentum \\
+Sharpe 6m & $sharpe\_6m$ & As above & Momentum \\
+Sharpe Ewma & $sharpe\_ewma$ & As above & Momentum \\
+Skewness 1y & $skew\_1y$ & Bali et al. (2016)  & Skewness \\
+Skewness 3y & $skew\_3y$ & As above & Skewness \\
+Short-term Reversal & $ret\_1m$ & Jegadeesh (1990) & Reversal \\
+Volatility of Liquidity & $sd\_volfin\_6m$ & 
+Chordia et al. (2001) & Size \\
+Tobin Q & $tobin\_q$ & Freyberger (2020) & Value \\
+Total Debt Growth & $total\_debt\_gr3y$ & Lyandres et al. (2008) & Leverage \\
+Turnover & $turnover\_3m$ & Datar et al. (1998) & Size \\
+Trading Volume & $mean\_volfin\_3m$ & Chordia et al. (2001) & Size \\
+Unexplained Volume & $qtt\_1m\_sur\_3y$ & Garfinkel (2009) & Size \\
+Volatility & $vol\_12m$ & Ang et al. (2006)  & Low Risk \\
+Yearly Inflation Surprise & $ipca\_yearly\_sur\_5y$ & Duarte (2013) & Macro \\
+\hline
+\end{tabularx}
+\label{mostcitedarticles}
+\end{table}
+
+
+
+
+\newpage
+
+
+
+
+  \label{sec:hyperef} 
+      \vspace{1em} % Add some vertical space if needed
+\begin{table}[h]
+
+\captionsetup{
+  justification=raggedright, % Left-align the caption
+  labelsep=none,
+  singlelinecheck=false, % Allow multi-line captions
+  labelformat=boldlabel, % Use the custom label format
+}
+
+\renewcommand{\arraystretch}{1.25}
+\caption[Table 4: \footnotesize ]{\footnotesize \\ \textbf{Candidate values for hyperparameters}. This table describes candidate values for grid-search.}  
+\footnotesize % Reduce font size further
+\begin{tabularx}{\linewidth}{>{\raggedright\arraybackslash}m{1cm}>{\raggedright\arraybackslash}m{2cm}>{\raggedright\arraybackslash}m{3cm}>{\raggedright\arraybackslash}m{3cm}>{\raggedright\arraybackslash}m{4cm}}
+\hline
+\multirow{2}{*}{$\lambda^{v}$} & \multirow{2}{*}{ENET} & \multirow{2}{*}{RF} & \multirow{2}{*}{XGBoost} & \multirow{2}{*}{ANN1-ANN3} \\
+& & & & \\
+\hline
+$\lambda^{\psi}$ & $10^{-[4,2]}$ & - & - & - \\
+$\lambda^{\rho}$ & 0.5 & - & - & - \\
+$\lambda^{D}$ & -  & (2, 4, 8, 10) & (2, 4, 8, 10) & - \\
+$\lambda^{T}$\/$\lambda^{F}$  & -  & 500 & 500 & - \\
+$\lambda^{R}$ & -  & (0.01, 0.1, \ldots, 1.0) & (0.50, 0.75) & (0.25, 0.50, 0.75) \\
+$\lambda^{B}$\/$\lambda^{S}$ & -  & 1 & 1 & - \\
+$\lambda^{\gamma}$ & - & - & (0, 2, 5) & - \\
+$\lambda^{\Lambda}$ & - & - & (2, 5) & - \\
+$\lambda^{\eta}$ & - & - & (0.001, 0.005, \ldots, 0.02) & $10^{-(2,3,4,5)}$ \\
+$\lambda^{\phi}$ & - & - & 50 & 5 \\
+$\lambda^{\omega}$ & - & - & - & $10^{-(2,3,4,5)}$ \\
+$\lambda^{\delta}$ & - & - & - & 0 \\
+$\lambda^{b}$ & - & - & - & 512 \\
+$\lambda^{e}$ & - & - & - & 100 \\
+$\lambda^{\iota}$ & - & - & - & 10 \\
+\hline
+\end{tabularx}
+\label{hyperchoice}
+\end{table}      
+
+
+
+
+\end{appendices}
+\end{document}
+
+%\endinput
+%%
+%% End of file `elsarticle-template-harv.tex'.

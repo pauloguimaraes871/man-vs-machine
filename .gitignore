@@ -1,0 +1,39 @@
+# Raw and potentially confidential research data
+/data/
+
+# R and RStudio user state
+/.Rproj.user/
+/.Rhistory
+/.RData
+/.Ruserdata
+
+# Local assistant settings
+/.claude/settings.local.json
+
+# renv dependency caches (retain activate.R, settings.json, and renv.lock)
+/renv/library/
+/renv/staging/
+/renv/python/
+/renv/local/
+/renv/cellar/
+/renv/sandbox/
+
+# LaTeX intermediate and backup files
+*.aux
+*.bcf
+*.blg
+*.fdb_latexmk
+*.fls
+*.log
+*.out
+*.run.xml
+*.spl
+*.synctex.gz
+*.tex.bak
+*.toc
+*.lof
+*.lot
+
+# Operating-system files
+.DS_Store
+Thumbs.db
