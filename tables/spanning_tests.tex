@@ -1,0 +1,18 @@
+\begin{table}[h]
+\captionsetup{justification=raggedright,labelsep=none,singlelinecheck=false,labelformat=boldlabel}
+\caption[Table 7: \footnotesize ]{\footnotesize \textbf{: Two-direction mean--variance spanning tests.} For $Y_t=\alpha+B X_t+\varepsilon_t$, the joint restrictions $\alpha=0$ and $B\mathbf{1}=\mathbf{1}$ state that the $K$ benchmark assets span the mean--variance opportunity set of the $N$ test assets. Rejection means the test assets shift the unconstrained mean--variance frontier, which a sufficiently negative intercept achieves through a short sale; the economically relevant magnitudes for a long-only investor are therefore $\Delta$SR and $\Delta$IR, and the intercepts reported beneath the table show the direction of each deviation. In ``ML spans human'', $X$ contains RP, CS and MVO\_BOX and $Y$ contains FUNDS\_MEAN and the ex-post FUNDS\_Q75; the reverse row swaps the sets. The three ML portfolios are pre-specified representatives of a risk-controlled ensemble, direct signal weighting and constrained mean--variance optimization, keeping the benchmark dimension modest rather than selecting portfolios by performance. $p_{\chi^2}$ is the asymptotic Wald p-value; $p_{BB}$ uses 999 restricted-residual circular 12-month block-bootstrap replications. $\kappa(X)$ is the condition number of the regression design. $\Delta$SR and $\Delta$IR are increases in the maximum long-only Sharpe ratio relative to CDI and Information Ratio relative to IBOV after adding the test assets. Results are conditional on the common full evaluation window and, for FUNDS\_Q75, an ex-post fund classification.}
+\scriptsize
+\setlength{\tabcolsep}{3pt}
+\begin{tabularx}{\linewidth}{>{\raggedright\arraybackslash}m{2.5cm}*{9}{>{\raggedleft\arraybackslash}X}}
+\hline
+Direction & $K$ & $N$ & Wald & df & $p_{\chi^2}$ & $p_{BB}$ & $\kappa(X)$ & $\Delta$SR & $\Delta$IR \\
+\hline
+ML spans human & 3 & 2 & 71.69 & 4 & 0.000 & 0.001 & 13.90 & 0.028 & 0.095 \\
+Human spans ML & 2 & 3 & 28.90 & 6 & 0.000 & 0.001 & 16.89 & 0.000 & 0.008 \\
+\hline
+\multicolumn{10}{@{}p{0.98\linewidth}@{}}{\textit{ML spans human: FUNDS\_MEAN $\alpha$ -0.31 ($t$ -2.46); FUNDS\_Q75 $\alpha$ 0.17 ($t$ 1.41) (percent per month).}} \\
+\multicolumn{10}{@{}p{0.98\linewidth}@{}}{\textit{Human spans ML: RP $\alpha$ 0.16 ($t$ 1.02); CS $\alpha$ -0.03 ($t$ -0.13); MVO\_BOX $\alpha$ -0.05 ($t$ -0.30) (percent per month).}} \\
+\hline
+\end{tabularx}
+\label{spanningtests}
+\end{table}

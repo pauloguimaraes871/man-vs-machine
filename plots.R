@@ -261,8 +261,8 @@ med_fund_row <- function(fund_names, label) {
 }
 
 med_fund_rows <- dplyr::bind_rows(
-  med_fund_row(reliable_funds, "MED_FUND"),
-  med_fund_row(reliable_top_funds, "MED_FUND_Q75")
+  med_fund_row(reliable_funds, "MED"),
+  med_fund_row(reliable_top_funds, "MED_Q75")
 )
 
 # ---- ML meta-portfolio performance, net of a fictitious management fee -----
@@ -331,7 +331,7 @@ tex_panel_header <- function(label) {
 }
 
 active_col_preamble <- paste0(
-  "\\begin{tabularx}{\\linewidth}{>{\\raggedright\\arraybackslash}m{2.5cm}",
+  "\\begin{tabularx}{\\linewidth}{>{\\raggedright\\arraybackslash}m{2.7cm}",
   "*{8}{>{\\raggedleft\\arraybackslash}X}}"
 )
 active_col_header <- paste(
@@ -373,15 +373,19 @@ ensemble_table_tex <- c(
     "(Ret.), Tracking Error (TE), Information Ratio (IR), Active ",
     "Expected Shortfall (AES), Active Ulcer Index (Ulcer), Annualized Active Martin ",
     "Ratio (MR), CAPM alpha ($\\alpha$, in percent per month) and its t-statistic ",
-    "($t(\\alpha)$) are displayed. ML portfolio returns are net of transaction costs ",
+    "($t(\\alpha)$) are displayed. IR here is the geometrically compounded ",
+    "annualized active return divided by the tracking error; the combination and ",
+    "fund-picking tables use the arithmetic-mean convention and therefore report ",
+    "systematically lower values for the same portfolios. ",
+    "ML portfolio returns are net of transaction costs ",
     "and of a 1\\% p.a. management fee. The human-manager benchmarks come in two ",
     "forms. FUNDS\\_MEAN and FUNDS\\_Q75 apply the metrics to a single aggregated ",
     "return series --- an equally weighted portfolio of, respectively, all eligible ",
     "funds and the top-quartile eligible funds (ranked by mean return over the ",
     "evaluation window) --- ",
     "and therefore ",
-    "embed the diversification of holding many funds at once. MED\\_FUND and ",
-    "MED\\_FUND\\_Q75 instead compute each metric for every fund individually and then ",
+    "embed the diversification of holding many funds at once. MED and ",
+    "MED\\_Q75 instead compute each metric for every fund individually and then ",
     "report the median across funds, describing the experience of an investor who ",
     "picks a single (respectively, any or top-quartile) fund. Every human-manager ",
     "benchmark uses the same universe of funds with at least 36 monthly observations. ",
@@ -391,7 +395,8 @@ ensemble_table_tex <- c(
     "are therefore cross-fund medians of fund-level quantities, not statistics of a ",
     "tradable portfolio.}"
   ),
-  "\\footnotesize",
+  "\\scriptsize",
+  "\\setlength{\\tabcolsep}{3pt}",
   active_col_preamble,
   "\\hline",
   active_col_header,
@@ -501,7 +506,7 @@ writeLines(model_table_tex, here::here("tables", "model_performance.tex"))
 
 # ---- Shared plotting / LaTeX helpers ---------------------------------------
 # Journal-theme styling shared by the composition and feature-importance grids.
-plot_base_size <- 17
+plot_base_size <- 19
 
 journal_area_theme <- function(base_size = plot_base_size) {
   jp <- factoRverse:::.journal_palette()
@@ -610,15 +615,28 @@ fi_heat <- fi_all %>%
   dplyr::group_by(model, dates, theme) %>%
   dplyr::summarise(importance = sum(normalized_importance, na.rm = TRUE), .groups = "drop")
 
+fi_heat_base_size <- 16
 fi_heat_grid <- ggplot2::ggplot(fi_heat, ggplot2::aes(x = dates, y = theme, fill = importance)) +
   ggplot2::geom_tile() +
   ggplot2::facet_wrap(~model, ncol = 2) +
   ggplot2::scale_fill_gradient2(low = jp_fi$negative, mid = "#EBEEF1", high = jp_fi$primary,
-                                midpoint = 0, name = "Net norm.\nimportance") +
+                                midpoint = 0, name = "Net norm. importance") +
+  ggplot2::guides(fill = ggplot2::guide_colorbar(
+    title.position = "top",
+    title.hjust = 0.5,
+    barwidth = grid::unit(8, "cm"),
+    barheight = grid::unit(0.45, "cm")
+  )) +
   ggplot2::labs(x = NULL, y = NULL,
                 title = "Net feature importance by theme over time across ML models") +
-  journal_area_theme() +
-  ggplot2::theme(panel.grid = ggplot2::element_blank())
+  journal_area_theme(base_size = fi_heat_base_size) +
+  ggplot2::theme(
+    panel.grid = ggplot2::element_blank(),
+    axis.text = ggplot2::element_text(size = fi_heat_base_size - 2),
+    strip.text = ggplot2::element_text(size = fi_heat_base_size),
+    legend.text = ggplot2::element_text(size = fi_heat_base_size - 4),
+    legend.title = ggplot2::element_text(size = fi_heat_base_size - 2)
+  )
 
 ggplot2::ggsave(here::here("figures", "feature_importance_bar.png"),
                 fi_bar_grid, width = 14, height = 11, dpi = 300, bg = "white")
@@ -1049,10 +1067,15 @@ ff_t_row <- function(r) {
   sprintf(" & (%.2f) & (%.2f) & (%.2f) & (%.2f) & (%.2f) & (%.2f) & (%.2f) & \\\\",
           t[["alpha"]], t[["MKT"]], t[["HML"]], t[["MOM"]], t[["RMW"]], t[["SMB"]], t[["CMA"]])
 }
-ff_block <- function(label) {
+ff_block <- function(label, display_label = label) {
   r <- ff_results[[label]]
-  if (is.null(r)) return(sprintf("%s & \\multicolumn{8}{c}{--} \\\\", gsub("_", "\\\\_", label)))
-  c(ff_est_row(label, r), ff_t_row(r))
+  if (is.null(r)) {
+    return(sprintf(
+      "%s & \\multicolumn{8}{c}{--} \\\\",
+      gsub("_", "\\\\_", display_label)
+    ))
+  }
+  c(ff_est_row(display_label, r), ff_t_row(r))
 }
 
 ml_labels <- pretty_port_label(colnames(ml_ports_net_m_xts))
@@ -1080,14 +1103,14 @@ factor_table_tex <- c(
     "previous calendar 15th through the current calendar 15th, matching the ML and ",
     "factor-portfolio timing. MKT is therefore the contemporaneous market loading. ",
     "Estimates are shown with t-statistics in parentheses; $R^2$ is the regression ",
-    "fit. MED\\_FUND and ",
-    "MED\\_FUND\\_Q75 regress each fund individually and report the median loading ",
+    "fit. MED and ",
+    "MED\\_Q75 regress each fund individually and report the median loading ",
     "across (all / top-quartile) funds.}"
   ),
   "\\scriptsize",
   "\\setlength{\\tabcolsep}{3pt}",
   paste0(
-    "\\begin{tabularx}{\\linewidth}{>{\\raggedright\\arraybackslash}m{1.6cm}",
+    "\\begin{tabularx}{\\linewidth}{>{\\raggedright\\arraybackslash}m{2.3cm}",
     "*{8}{>{\\raggedleft\\arraybackslash}X}}"
   ),
   "\\hline",
@@ -1100,8 +1123,8 @@ factor_table_tex <- c(
   ff_block("FUNDS_MEAN"),
   ff_block("FUNDS_Q75"),
   tex_panel_header("Benchmarks --- representative single fund (median across funds)"),
-  ff_block("MED_FUND"),
-  ff_block("MED_FUND_Q75"),
+  ff_block("MED_FUND", "MED"),
+  ff_block("MED_FUND_Q75", "MED_Q75"),
   "\\hline",
   "\\end{tabularx}",
   "\\label{factorattr}",
@@ -1128,6 +1151,15 @@ plot(mb_ind_signals_result$chosen_mb_backtest_results_initial,
 grDevices::dev.off()
 
 hfi_plot <- ggplot2::last_plot()
+if (!"name" %in% colnames(hfi_plot$data)) {
+  rlang::abort("The hierarchical feature-importance graph has no node-name column.")
+}
+hfi_plot$data$name <- gsub(
+  "_bayes",
+  "",
+  as.character(hfi_plot$data$name),
+  ignore.case = TRUE
+)
 is_node_text <- vapply(
   hfi_plot$layers,
   function(layer) inherits(layer$geom, "GeomText"),
@@ -1141,7 +1173,7 @@ hfi_plot <- hfi_plot +
     ggplot2::aes(x = x, y = y, label = name),
     inherit.aes = FALSE,
     color = jp_hfi$text,
-    size = 3.6,
+    size = 4.0,
     fontface = "bold",
     seed = 20260726,
     box.padding = 0.25,
@@ -1182,10 +1214,9 @@ writeLines(hierarchical_fi_figure_tex,
 # ---- Global surrogate fit: how linear each ML model's predictions are -------
 # final_gsm is the fitted OLS global surrogate (an `lm`) regressing each model's
 # out-of-sample predictions on the [-1, 1] cross-sectionally scaled signals.
-# Its R^2 is the share of prediction variance explained linearly; 1 - R^2 and
-# the residual variance measure the nonlinearity/interactions the linear
-# surrogate cannot capture. Only the final refit's surrogate is stored, so this
-# is an end-of-sample snapshot per model (not a time series).
+# Its R^2 is the share of prediction variance explained linearly. Only the final
+# refit's surrogate is stored, so this is an end-of-sample snapshot per model
+# rather than a time series.
 jp_gsm <- factoRverse:::.journal_palette()
 
 gsm_stats <- purrr::imap_dfr(sb_list, function(sbr, nm) {
@@ -1194,26 +1225,29 @@ gsm_stats <- purrr::imap_dfr(sb_list, function(sbr, nm) {
   tibble::tibble(
     model     = fi_model_label(nm),
     intercept = stats::coef(g)[["(Intercept)"]],  # ~ mean predicted active return
-    r2        = summary(g)$r.squared,
-    resid_var = stats::var(stats::residuals(g))
+    r2        = summary(g)$r.squared
   )
 })
 gsm_stats$model <- factor(gsm_stats$model,
                           levels = intersect(fi_model_order, gsm_stats$model))
 
 gsm_long <- gsm_stats %>%
-  tidyr::pivot_longer(c(intercept, r2, resid_var), names_to = "metric", values_to = "value") %>%
+  tidyr::pivot_longer(c(intercept, r2), names_to = "metric", values_to = "value") %>%
   dplyr::mutate(metric = factor(
     dplyr::recode(metric,
-                  intercept = "Surrogate intercept",
-                  r2        = "Surrogate R²",
-                  resid_var = "Residual variance"),
-    levels = c("Surrogate intercept", "Surrogate R²", "Residual variance")
+                  intercept = "Surrogate~intercept",
+                  r2        = "Surrogate~R^2"),
+    levels = c("Surrogate~intercept", "Surrogate~R^2")
   ))
 
 gsm_plot <- ggplot2::ggplot(gsm_long, ggplot2::aes(x = model, y = value, fill = model)) +
   ggplot2::geom_col(width = 0.7) +
-  ggplot2::facet_wrap(~metric, ncol = 3, scales = "free_y") +
+  ggplot2::facet_wrap(
+    ~metric,
+    ncol = 2,
+    scales = "free_y",
+    labeller = ggplot2::label_parsed
+  ) +
   ggplot2::scale_fill_manual(
     values = rep(jp_gsm$categorical, length.out = nlevels(gsm_stats$model)),
     guide = "none"
@@ -1223,32 +1257,24 @@ gsm_plot <- ggplot2::ggplot(gsm_long, ggplot2::aes(x = model, y = value, fill = 
   journal_area_theme()
 
 ggplot2::ggsave(here::here("figures", "surrogate_fit.png"),
-                gsm_plot, width = 15, height = 6, dpi = 300, bg = "white")
+                gsm_plot, width = 12, height = 6, dpi = 300, bg = "white")
 
 # ---- Paste-ready LaTeX for the surrogate-fit figure ------------------------
 surrogate_fit_figure_tex <- latex_figure(
   "surrogate_fit.png", 7,
   "Linear explainability of each ML model's predictions.",
   paste(
-    "For each ML model (OLS, GLMNET, RF, XGB, NN1--NN3), the out-of-sample",
-    "predictions are regressed on the signals (each cross-sectionally scaled to",
-    "$[-1, 1]$ that month, hence approximately mean-zero) via the OLS global",
-    "surrogate model. \\emph{Left (intercept):} because the scaled signals are",
-    "centred, the intercept is approximately the mean of the model's predictions",
-    "-- its baseline predicted active return for a characteristic-neutral (median)",
-    "stock. It captures the unconditional level of predicted active returns and",
-    "also absorbs any level shift induced by the model's curvature (since it",
-    "equals the average prediction, $\\mathrm{E}[f(x)]$, not the prediction at the",
-    "average, $f(\\mathrm{E}[x])$); it is a common shift across stocks and does not",
-    "affect the cross-sectional ranking. \\emph{Centre (}$R^2$\\emph{):} the share",
-    "of prediction variance that is linear in the signals -- values near one",
-    "indicate an essentially linear model. \\emph{Right (residual variance):} the",
-    "variance of the surrogate residuals, i.e. the part of the predictions the",
-    "linear surrogate cannot reproduce. Together, $1 - R^2$ and the residual",
-    "variance measure the nonlinearity and interaction structure the ML model",
-    "captures beyond a linear function of the signals; both are near zero for the",
-    "linear models (OLS, GLMNET) and larger for the tree and neural-network",
-    "models. Values are for the final-refit surrogate on the individual-signals run."
+    "For each ML model (OLS, GLMNET, RF, XGB, NN1--NN3), an OLS global surrogate",
+    "regresses the model's predictions on the same signals, scaled",
+    "cross-sectionally to $[-1,1]$. \\emph{Left:} the surrogate intercept is",
+    "approximately the model's mean predicted active return because the scaled",
+    "signals are approximately centred. It captures a common level shift across",
+    "stocks and therefore does not affect their cross-sectional ranking.",
+    "\\emph{Right:} surrogate $R^2$ is the share of prediction variance reproduced",
+    "by a linear function of the signals. Values near one indicate an essentially",
+    "linear prediction rule, whereas lower values indicate nonlinearities and",
+    "interactions. Both diagnostics use the final-refit surrogate from the",
+    "individual-signals specification."
   ),
   "fig:surrogate_fit"
 )
@@ -1476,7 +1502,7 @@ cor_long <- function(cor_mat, panel_label) {
   d
 }
 
-correlogram_plot <- function(long_df, title, ncol = 1L, text_size = 4) {
+correlogram_plot <- function(long_df, title, ncol = 1L, text_size = 4.4) {
   ggplot2::ggplot(long_df, ggplot2::aes(x = col, y = row, fill = corr)) +
     ggplot2::geom_tile(color = jp_cor$background, linewidth = 0.3) +
     ggplot2::geom_text(ggplot2::aes(label = sprintf("%.2f", corr)),
@@ -1595,7 +1621,7 @@ perf_cor_long <- cor_long(act_cor, "Active returns (vs IBOV)")
 perf_cor_plot <- correlogram_plot(
   perf_cor_long,
   title = "Active return correlation: ML Ensemble portfolios vs human managers",
-  text_size = 4.1
+  text_size = 4.5
 )
 ggplot2::ggsave(here::here("figures", "correlogram_performance.png"),
                 perf_cor_plot, width = 12, height = 10.5, dpi = 300, bg = "white")
@@ -1673,12 +1699,18 @@ combo_metrics <- function(combo_total, combo_active, rf) {
   sd_e <- apply(xe, 2, stats::sd, na.rm = TRUE)
   act_ret  <- colMeans(xa, na.rm = TRUE) * 12
   act_risk <- apply(xa, 2, stats::sd, na.rm = TRUE) * sqrt(12)
+  med_ret  <- stats::median(act_ret, na.rm = TRUE)
+  med_risk <- stats::median(act_risk, na.rm = TRUE)
   # median() over a single-column case returns that column's own value.
   tibble::tibble(
     sharpe      = stats::median(colMeans(xe, na.rm = TRUE) / sd_e * sqrt(12), na.rm = TRUE),
     ir          = stats::median(act_ret / act_risk, na.rm = TRUE),
-    active_ret  = stats::median(act_ret, na.rm = TRUE),
-    active_risk = stats::median(act_risk, na.rm = TRUE)
+    active_ret  = med_ret,
+    active_risk = med_risk,
+    # Slope of the plotted coordinate. Equals `ir` only when a single manager
+    # series is supplied; across funds median(a/b) != median(a)/median(b), so the
+    # frontier figure must use this one to stay internally consistent.
+    ir_plot     = med_ret / med_risk
   )
 }
 
@@ -1758,11 +1790,14 @@ jp_comb <- factoRverse:::.journal_palette()
 near0 <- function(x) abs(x) < 1e-9
 
 pure_ml_pts    <- combo_df %>% dplyr::filter(near0(w - 1))
+# The w = 0 point is NOT scheme-independent: months in which a fund does not
+# report are held in that scheme's ML portfolio, so each scheme has its own
+# pure-manager endpoint. Keep `scheme` in the key rather than collapsing.
 pure_human_pts <- combo_df %>% dplyr::filter(near0(w)) %>%
-  dplyr::distinct(human, active_risk, active_ret)
+  dplyr::distinct(human, scheme, active_risk, active_ret)
 max_ir_pts <- combo_df %>%
   dplyr::group_by(scheme, human) %>%
-  dplyr::slice_max(ir, n = 1, with_ties = FALSE) %>%
+  dplyr::slice_max(ir_plot, n = 1, with_ties = FALSE) %>%
   dplyr::ungroup()
 
 scheme_cols <- setNames(
@@ -1776,8 +1811,7 @@ combo_plot <- ggplot2::ggplot(
   ggplot2::geom_path(linewidth = 0.5, alpha = 0.9) +
   ggplot2::geom_point(data = max_ir_pts, shape = 18, size = 2.6) +
   ggplot2::geom_point(data = pure_ml_pts, shape = 17, size = 2.2) +
-  ggplot2::geom_point(data = pure_human_pts, ggplot2::aes(x = active_risk, y = active_ret),
-                      inherit.aes = FALSE, shape = 15, size = 3.2, color = jp_comb$text) +
+  ggplot2::geom_point(data = pure_human_pts, shape = 15, size = 3.2) +
   ggplot2::facet_wrap(~human, ncol = 2) +   # 2x2: diversified vs single pick, average vs top quartile
   ggplot2::scale_color_manual(values = scheme_cols, name = NULL) +
   ggplot2::expand_limits(x = 0, y = 0) +   # keeps IR readable as slope from origin
@@ -1796,10 +1830,16 @@ ggplot2::ggsave(here::here("figures", "combination_frontier.png"),
                 combo_plot, width = 13, height = 11, dpi = 300, bg = "white")
 
 # ---- Table 6: combination frontier optima ----------------------------------
+combo_table_human <- dplyr::recode(
+  as.character(combo_summary$human),
+  MED_FUND = "MED",
+  MED_FUND_Q75 = "MED_Q75"
+)
+
 combo_table_body <- sprintf(
   "%s & %s & %.2f & %.2f & %.2f & %.0f\\%% & %.2f & %.2f & %.2f & %.0f\\%% \\\\",
   gsub("_", "\\\\_", as.character(combo_summary$scheme)),
-  gsub("_", "\\\\_", as.character(combo_summary$human)),
+  gsub("_", "\\\\_", combo_table_human),
   combo_summary$sharpe_human, combo_summary$sharpe_ml, combo_summary$sharpe_best,
   combo_summary$w_sharpe * 100,
   combo_summary$ir_human, combo_summary$ir_ml, combo_summary$ir_best,
@@ -1814,41 +1854,31 @@ combo_table_tex <- c(
   "  singlelinecheck=false,",
   "  labelformat=boldlabel,",
   "}",
-  "\\renewcommand{\\arraystretch}{1.25}",
+  "\\renewcommand{\\arraystretch}{1.05}",
   paste0(
     "\\caption[Table 6: \\footnotesize ]{\\footnotesize \\textbf{: Man-and-machine ",
     "combination frontier.} Each row combines one ML Ensemble portfolio with one ",
-    "human-manager benchmark, rebalanced monthly to constant weights $w$ in the ML ",
-    "portfolio and $1-w$ in the manager, over a grid $w \\in \\{0, 0.05, \\ldots, 1\\}$. ",
-    "Because the two-asset weight space is one-dimensional, the frontier is traced ",
-    "with a deterministic grid rather than random draws. Sharpe ratios are ",
-    "annualized and computed on returns in excess of the CDI; Information Ratios ",
-    "are annualized and computed on returns active against IBOV. For each metric ",
-    "the table reports the pure-manager value ($w = 0$), the pure-ML value ",
-    "($w = 1$), the best value attained on the grid, and the weight $w^{*}$ that ",
-    "attains it. An interior $w^{*}$ indicates a diversification gain from ",
-    "combining machine and human portfolios. Four manager archetypes are ",
-    "considered: a portfolio diversified across all eligible funds (FUNDS\\_MEAN) or across ",
-    "top-quartile funds (FUNDS\\_Q75), and a single fund drawn either from the eligible ",
-    "universe (MED\\_FUND) or from the top quartile (MED\\_FUND\\_Q75). For the ",
-    "single-fund rows, metrics are computed for the combination with ",
-    "each fund individually and the median across funds is reported; averaging the ",
-    "combined returns across funds would instead collapse exactly to the ",
-    "FUNDS\\_MEAN combination. When a fund has closed or has not yet launched, that ",
-    "month is held entirely in the ML portfolio, so each combination is a ",
-    "continuously invested path.}"
+    "human-manager benchmark over $w \\in \\{0, 0.05, \\ldots, 1\\}$. Annualized ",
+    "Sharpe ratios use the CDI and Information Ratios use IBOV; all returns are ",
+    "measured 15th-to-15th. Information Ratios are the annualized arithmetic mean ",
+    "active return divided by the tracking error, so they are not directly ",
+    "comparable with the geometric convention of Table~\\ref{actret}. ",
+    "Human and ML denote $w=0$ and $w=1$; Best and $w^{*}$ ",
+    "report the grid optimum. FUNDS\\_MEAN and FUNDS\\_Q75 are diversified eligible-fund ",
+    "portfolios. MED and MED\\_Q75 report medians across eligible individual-fund ",
+    "combinations. Missing fund periods are allocated entirely to the ML leg.}"
   ),
   "\\scriptsize",
   "\\setlength{\\tabcolsep}{3pt}",
   paste0(
-    "\\begin{tabularx}{\\linewidth}{>{\\raggedright\\arraybackslash}m{1.4cm}",
-    ">{\\raggedright\\arraybackslash}m{2.4cm}*{8}{>{\\raggedleft\\arraybackslash}X}}"
+    "\\begin{tabularx}{\\linewidth}{>{\\raggedright\\arraybackslash}m{2.8cm}",
+    ">{\\raggedright\\arraybackslash}m{2.2cm}*{8}{>{\\raggedleft\\arraybackslash}X}}"
   ),
   "\\hline",
   paste("& & \\multicolumn{4}{c}{Sharpe ratio} &",
         "\\multicolumn{4}{c}{Information ratio} \\\\"),
-  paste("Portfolio & Manager & Human & ML & Best & $w^{*}$ &",
-        "Human & ML & Best & $w^{*}$ \\\\"),
+  paste("Portfolio & Manager & Hum. & ML & Best & $w^{*}$ &",
+        "Hum. & ML & Best & $w^{*}$ \\\\"),
   "\\hline",
   combo_table_body,
   "\\hline",
@@ -1868,14 +1898,836 @@ combination_figure_tex <- latex_figure(
     "$w$ in an ML Ensemble portfolio and $1-w$ in a human-manager benchmark.",
     "FUNDS\\_MEAN and FUNDS\\_Q75 are diversified fund portfolios; MED\\_FUND and",
     "MED\\_FUND\\_Q75 report the median result across individual-fund combinations.",
+    "In the two diversified panels the Information Ratio is the slope of a ray from",
+    "the origin. In the two MED panels the coordinates are cross-fund medians of the",
+    "components, so the slope is the median-component ratio and not the median of",
+    "the fund-level Information Ratios reported in Table~\\ref{combofront}.",
     "All returns are measured 15th-to-15th against IBOV. Squares, triangles and",
-    "diamonds mark the pure manager, pure ML portfolio and maximum-IR combination."
+    "diamonds mark the pure manager, pure ML portfolio and maximum-IR combination.",
+    "In the MED panels the $w=0$ square differs by ML scheme because months in which",
+    "a fund does not report are held in that scheme's ML portfolio."
   ),
   "fig:combo_frontier"
 )
 
 writeLines(combination_figure_tex,
            here::here("figures", "combination_frontier_figure.tex"))
+
+# ---- Fund-picking robustness ------------------------------------------------
+# The primary specification is fixed before examining these robustness results:
+# RP is the paper's most transparent risk-controlled ML construction. Other ML
+# schemes remain visible in the oracle-quantile figure as descriptive checks.
+primary_ml_scheme <- "RP"
+if (!primary_ml_scheme %in% colnames(ml_ret_mat)) {
+  rlang::abort("The pre-specified RP portfolio is missing from the ML return matrix.")
+}
+primary_ml_ret <- ml_ret_mat[, primary_ml_scheme]
+
+annualized_ir <- function(returns_pct, benchmark_pct) {
+  active <- returns_pct - benchmark_pct
+  active <- active[is.finite(active)]
+  if (length(active) < 3L) return(NA_real_)
+  active_sd <- stats::sd(active)
+  if (!is.finite(active_sd) || active_sd <= 0) return(NA_real_)
+  mean(active) / active_sd * sqrt(12)
+}
+
+fund_portfolio_return <- function(fund_panel, fund_names) {
+  if (length(fund_names) == 0L) {
+    rlang::abort("A fund portfolio cannot be formed from an empty selection.")
+  }
+  out <- rowMeans(fund_panel[, fund_names, drop = FALSE], na.rm = TRUE)
+  out[!is.finite(out)] <- NA_real_
+  out
+}
+
+rank_funds <- function(fund_panel) {
+  scores <- colMeans(fund_panel, na.rm = TRUE)
+  valid <- is.finite(scores)
+  if (!any(valid)) rlang::abort("No funds have finite returns in the ranking window.")
+  names(scores)[valid][order(-scores[valid], names(scores)[valid])]
+}
+
+combo_ir_result <- function(ml_returns, human_returns, benchmark, weights = w_grid) {
+  if (length(ml_returns) != length(human_returns) ||
+      length(ml_returns) != length(benchmark)) {
+    rlang::abort("ML, human, and benchmark returns must have identical lengths.")
+  }
+  ir_path <- vapply(weights, function(w) {
+    combined <- w * ml_returns + (1 - w) * human_returns
+    combined[!is.finite(human_returns)] <- ml_returns[!is.finite(human_returns)]
+    annualized_ir(combined, benchmark)
+  }, numeric(1))
+  if (all(!is.finite(ir_path))) {
+    rlang::abort("No finite Information Ratio was obtained on the weight grid.")
+  }
+  best_index <- which.max(ir_path)
+  tibble::tibble(
+    ir_human = ir_path[[which.min(abs(weights))]],
+    ir_ml = ir_path[[which.min(abs(weights - 1))]],
+    ir_best = ir_path[[best_index]],
+    delta_ir = ir_path[[best_index]] -
+      max(ir_path[[which.min(abs(weights))]], ir_path[[which.min(abs(weights - 1))]]),
+    w_ir = weights[[best_index]]
+  )
+}
+
+circular_block_indices <- function(n, block_length) {
+  if (n < 2L || block_length < 1L || block_length > n) {
+    rlang::abort("Invalid sample or block length for the circular bootstrap.")
+  }
+  starts <- sample.int(n, ceiling(n / block_length), replace = TRUE)
+  indices <- unlist(lapply(starts, function(s) {
+    ((s - 1L + seq_len(block_length) - 1L) %% n) + 1L
+  }), use.names = FALSE)
+  indices[seq_len(n)]
+}
+
+# Oracle sensitivity: rank over the full evaluation window, then vary the
+# retained top share. This is deliberately a performance bound, not a strategy.
+oracle_top_shares <- c(0.50, 0.35, 0.25, 0.15, 0.10, 0.05)
+oracle_ranked_funds <- rank_funds(fund_ret_window)
+
+oracle_human_returns <- setNames(lapply(oracle_top_shares, function(top_share) {
+  n_selected <- max(1L, ceiling(top_share * length(oracle_ranked_funds)))
+  fund_portfolio_return(
+    fund_ret_window,
+    oracle_ranked_funds[seq_len(n_selected)]
+  )
+}), as.character(oracle_top_shares))
+
+oracle_quantile_df <- purrr::map_dfr(colnames(ml_ret_mat), function(scheme) {
+  purrr::map_dfr(oracle_top_shares, function(top_share) {
+    human_returns <- oracle_human_returns[[as.character(top_share)]]
+    dplyr::bind_cols(
+      tibble::tibble(
+        scheme = scheme,
+        top_share = top_share,
+        n_funds = max(1L, ceiling(top_share * length(oracle_ranked_funds)))
+      ),
+      combo_ir_result(ml_ret_mat[, scheme], human_returns, bench_fund_vec)
+    )
+  })
+})
+
+# Jointly resample months, re-rank funds inside each sample, and preserve all
+# cross-series dependence. The interval therefore includes ranking uncertainty.
+oracle_bootstrap_reps <- 999L
+oracle_block_length <- 12L
+set.seed(20260727)
+oracle_bootstrap <- purrr::map_dfr(seq_len(oracle_bootstrap_reps), function(draw) {
+  idx <- circular_block_indices(nrow(fund_ret_window), oracle_block_length)
+  funds_b <- fund_ret_window[idx, , drop = FALSE]
+  ranked_b <- rank_funds(funds_b)
+  purrr::map_dfr(oracle_top_shares, function(top_share) {
+    n_selected <- max(1L, ceiling(top_share * length(ranked_b)))
+    human_b <- fund_portfolio_return(funds_b, ranked_b[seq_len(n_selected)])
+    dplyr::bind_cols(
+      tibble::tibble(draw = draw, top_share = top_share),
+      combo_ir_result(
+        primary_ml_ret[idx],
+        human_b,
+        bench_fund_vec[idx]
+      )
+    )
+  })
+})
+
+oracle_bootstrap_summary <- oracle_bootstrap %>%
+  dplyr::group_by(top_share) %>%
+  dplyr::summarise(
+    best_lo = stats::quantile(ir_best, 0.025, na.rm = TRUE),
+    best_hi = stats::quantile(ir_best, 0.975, na.rm = TRUE),
+    delta_lo = stats::quantile(delta_ir, 0.025, na.rm = TRUE),
+    delta_hi = stats::quantile(delta_ir, 0.975, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+oracle_plot_df <- oracle_quantile_df %>%
+  tidyr::pivot_longer(
+    cols = c(ir_human, ir_best),
+    names_to = "portfolio",
+    values_to = "ir"
+  ) %>%
+  dplyr::mutate(
+    scheme = factor(scheme, levels = colnames(ml_ret_mat)),
+    portfolio = factor(
+      portfolio,
+      levels = c("ir_human", "ir_best"),
+      labels = c("Human only", "Best combined")
+    )
+  )
+
+oracle_ribbon <- oracle_quantile_df %>%
+  dplyr::filter(scheme == primary_ml_scheme) %>%
+  dplyr::left_join(oracle_bootstrap_summary, by = "top_share")
+
+jp_picker <- factoRverse:::.journal_palette()
+picker_cols <- c(
+  "Human only" = jp_picker$categorical[[2]],
+  "Best combined" = jp_picker$primary
+)
+
+oracle_quantile_plot <- ggplot2::ggplot(
+  oracle_plot_df,
+  ggplot2::aes(x = top_share * 100, y = ir, color = portfolio)
+) +
+  ggplot2::geom_ribbon(
+    data = oracle_ribbon,
+    ggplot2::aes(x = top_share * 100, ymin = best_lo, ymax = best_hi),
+    inherit.aes = FALSE,
+    fill = jp_picker$primary,
+    alpha = 0.16
+  ) +
+  ggplot2::geom_vline(xintercept = 25, linetype = "dotted", color = jp_picker$text) +
+  ggplot2::geom_line(linewidth = 0.8) +
+  ggplot2::geom_point(size = 2.4) +
+  ggplot2::facet_wrap(~scheme, ncol = 4) +
+  ggplot2::scale_color_manual(values = picker_cols, name = NULL) +
+  ggplot2::scale_x_continuous(breaks = oracle_top_shares * 100) +
+  ggplot2::labs(
+    x = "Ex-post top share retained (%)",
+    y = "Information Ratio",
+    title = "Fund-picking sensitivity",
+    subtitle = "Dotted line: current top-quartile benchmark; shaded RP band: 95% block-bootstrap interval"
+  ) +
+  journal_area_theme() +
+  ggplot2::theme(plot.margin = ggplot2::margin(10, 10, 10, 18))
+
+ggplot2::ggsave(
+  here::here("figures", "fund_picker_quantile_sensitivity.png"),
+  oracle_quantile_plot,
+  width = 15,
+  height = 11,
+  dpi = 300,
+  bg = "white"
+)
+
+# Fixed-basket experiment within the oracle top quartile. Bands describe the
+# dispersion across possible baskets, not time-series sampling uncertainty.
+basket_sizes <- unique(c(1L, 2L, 3L, 5L, 10L, 20L, 50L, 100L,
+                         length(reliable_top_funds)))
+basket_draws_per_size <- 1000L
+set.seed(20260728)
+basket_draws <- purrr::map_dfr(basket_sizes, function(k) {
+  draws <- if (k == length(reliable_top_funds)) 1L else basket_draws_per_size
+  purrr::map_dfr(seq_len(draws), function(draw) {
+    selected <- if (k == length(reliable_top_funds)) {
+      reliable_top_funds
+    } else {
+      sample(reliable_top_funds, k, replace = FALSE)
+    }
+    human_returns <- fund_portfolio_return(fund_ret_window, selected)
+    dplyr::bind_cols(
+      tibble::tibble(basket_size = k, draw = draw),
+      combo_ir_result(primary_ml_ret, human_returns, bench_fund_vec)
+    )
+  })
+})
+
+basket_summary <- basket_draws %>%
+  dplyr::group_by(basket_size) %>%
+  dplyr::summarise(
+    draws = dplyr::n(),
+    median_best_ir = stats::median(ir_best),
+    best_ir_q05 = stats::quantile(ir_best, 0.05),
+    best_ir_q95 = stats::quantile(ir_best, 0.95),
+    median_delta_ir = stats::median(delta_ir),
+    probability_gain = mean(delta_ir > 0),
+    .groups = "drop"
+  ) %>%
+  dplyr::mutate(
+    position = dplyr::row_number(),
+    basket_label = dplyr::if_else(
+      basket_size == length(reliable_top_funds),
+      paste0("All\n(", basket_size, ")"),
+      as.character(basket_size)
+    )
+  )
+
+basket_plot <- ggplot2::ggplot(
+  basket_summary,
+  ggplot2::aes(x = position, y = median_best_ir)
+) +
+  ggplot2::geom_ribbon(
+    ggplot2::aes(ymin = best_ir_q05, ymax = best_ir_q95),
+    fill = jp_picker$primary,
+    alpha = 0.18
+  ) +
+  ggplot2::geom_line(color = jp_picker$primary, linewidth = 0.9) +
+  ggplot2::geom_point(color = jp_picker$primary, size = 2.8) +
+  ggplot2::geom_hline(
+    yintercept = annualized_ir(primary_ml_ret, bench_fund_vec),
+    color = jp_picker$categorical[[2]],
+    linetype = "dashed"
+  ) +
+  ggplot2::scale_x_continuous(
+    breaks = basket_summary$position,
+    labels = basket_summary$basket_label
+  ) +
+  ggplot2::labs(
+    x = "Number of top-quartile funds in the fixed basket",
+    y = "Best Information Ratio",
+    title = "Top-performer basket size",
+    subtitle = "Median and 5th--95th percentile across fixed baskets; dashed line is RP alone"
+  ) +
+  journal_area_theme() +
+  ggplot2::theme(plot.margin = ggplot2::margin(10, 10, 10, 18))
+
+ggplot2::ggsave(
+  here::here("figures", "fund_picker_basket_size.png"),
+  basket_plot,
+  width = 12.5,
+  height = 8.5,
+  dpi = 300,
+  bg = "white"
+)
+
+# Precision calibration: a fraction pi of each fixed basket is sampled from the
+# true top quartile and the remainder from outside it. Basket sizes are multiples
+# of four so every requested precision is represented exactly.
+picker_precisions <- c(0, 0.25, 0.50, 0.75, 1)
+precision_basket_sizes <- c(4L, 8L, 20L, 40L)
+precision_draws_per_cell <- 500L
+non_top_funds <- setdiff(reliable_funds, reliable_top_funds)
+
+set.seed(20260729)
+precision_draws <- purrr::map_dfr(precision_basket_sizes, function(k) {
+  purrr::map_dfr(picker_precisions, function(precision) {
+    n_top <- as.integer(precision * k)
+    n_other <- k - n_top
+    purrr::map_dfr(seq_len(precision_draws_per_cell), function(draw) {
+      selected <- c(
+        if (n_top > 0L) sample(reliable_top_funds, n_top, replace = FALSE) else character(),
+        if (n_other > 0L) sample(non_top_funds, n_other, replace = FALSE) else character()
+      )
+      human_returns <- fund_portfolio_return(fund_ret_window, selected)
+      dplyr::bind_cols(
+        tibble::tibble(
+          basket_size = k,
+          precision = precision,
+          draw = draw
+        ),
+        combo_ir_result(primary_ml_ret, human_returns, bench_fund_vec)
+      )
+    })
+  })
+})
+
+precision_summary <- precision_draws %>%
+  dplyr::group_by(basket_size, precision) %>%
+  dplyr::summarise(
+    median_best_ir = stats::median(ir_best),
+    median_delta_ir = stats::median(delta_ir),
+    probability_gain = mean(delta_ir > 0),
+    .groups = "drop"
+  )
+
+precision_thresholds <- precision_summary %>%
+  dplyr::group_by(basket_size) %>%
+  dplyr::summarise(
+    min_precision_positive = if (any(median_delta_ir > 0)) {
+      min(precision[median_delta_ir > 0])
+    } else {
+      NA_real_
+    },
+    min_precision_likely = if (any(probability_gain >= 0.75)) {
+      min(precision[probability_gain >= 0.75])
+    } else {
+      NA_real_
+    },
+    delta_at_full_precision = median_delta_ir[precision == 1],
+    .groups = "drop"
+  )
+
+precision_plot <- ggplot2::ggplot(
+  precision_summary,
+  ggplot2::aes(
+    x = factor(precision, levels = picker_precisions),
+    y = factor(basket_size, levels = rev(precision_basket_sizes)),
+    fill = median_delta_ir
+  )
+) +
+  ggplot2::geom_tile(color = "white", linewidth = 0.7) +
+  ggplot2::geom_text(
+    ggplot2::aes(
+      label = sprintf("%.2f\n(%d%%)", median_delta_ir, round(100 * probability_gain))
+    ),
+    size = 4.5,
+    color = jp_picker$text
+  ) +
+  ggplot2::scale_fill_gradient2(
+    low = jp_picker$negative,
+    mid = "#EBEEF1",
+    high = jp_picker$primary,
+    midpoint = 0,
+    breaks = c(0, 0.003, 0.006, 0.009, 0.012),
+    labels = function(x) sprintf("%.3f", x),
+    name = expression(Delta * " IR")
+  ) +
+  ggplot2::guides(
+    fill = ggplot2::guide_colorbar(
+      direction = "vertical",
+      barheight = grid::unit(55, "mm"),
+      barwidth = grid::unit(7, "mm"),
+      title.position = "top"
+    )
+  ) +
+  ggplot2::scale_x_discrete(labels = paste0(100 * picker_precisions, "%")) +
+  ggplot2::labs(
+    x = "Fund-picker precision",
+    y = "Basket size",
+    title = "Fund-picker precision",
+    subtitle = "Cells show median incremental IR; parentheses show probability of a positive gain"
+  ) +
+  journal_area_theme() +
+  ggplot2::theme(
+    panel.grid = ggplot2::element_blank(),
+    legend.position = "right",
+    plot.margin = ggplot2::margin(10, 10, 10, 18)
+  )
+
+ggplot2::ggsave(
+  here::here("figures", "fund_picker_precision.png"),
+  precision_plot,
+  width = 11.5,
+  height = 8.5,
+  dpi = 300,
+  bg = "white"
+)
+
+# Past-only diagnostic: use the preceding 12 months (at least nine observations)
+# to select the next month's top quartile. Evaluation begins after the warm-up.
+trailing_lookback <- 12L
+trailing_min_obs <- 9L
+trailing_eval_idx <- seq.int(trailing_lookback + 1L, nrow(fund_ret_window))
+trailing_q75 <- vapply(trailing_eval_idx, function(t) {
+  history <- fund_ret_window[(t - trailing_lookback):(t - 1L), , drop = FALSE]
+  scores <- colMeans(history, na.rm = TRUE)
+  valid <- colSums(is.finite(history)) >= trailing_min_obs & is.finite(scores)
+  if (!any(valid)) return(NA_real_)
+  ranked <- names(scores)[valid][order(-scores[valid], names(scores)[valid])]
+  selected <- ranked[seq_len(max(1L, ceiling(0.25 * length(ranked))))]
+  current <- fund_ret_window[t, selected, drop = TRUE]
+  if (all(!is.finite(current))) NA_real_ else mean(current, na.rm = TRUE)
+}, numeric(1))
+
+trailing_result <- combo_ir_result(
+  primary_ml_ret[trailing_eval_idx],
+  trailing_q75,
+  bench_fund_vec[trailing_eval_idx]
+)
+
+# Compact table: oracle threshold sensitivity, basket dispersion, precision
+# thresholds, and the separate past-only diagnostic.
+oracle_table <- oracle_quantile_df %>%
+  dplyr::filter(scheme == primary_ml_scheme) %>%
+  dplyr::left_join(oracle_bootstrap_summary, by = "top_share") %>%
+  dplyr::arrange(dplyr::desc(top_share))
+
+oracle_table_rows <- sprintf(
+  "%.0f\\%% & %d & %.2f & %.2f & %.2f & %.2f & %.0f\\%% & [%.2f, %.2f] \\\\",
+  100 * oracle_table$top_share,
+  oracle_table$n_funds,
+  oracle_table$ir_human,
+  oracle_table$ir_ml,
+  oracle_table$ir_best,
+  oracle_table$delta_ir,
+  100 * oracle_table$w_ir,
+  oracle_table$delta_lo,
+  oracle_table$delta_hi
+)
+
+basket_table_rows <- sprintf(
+  "%s & %d & %.2f & %.2f & %.2f & %.2f & %.0f\\%% & \\\\",
+  gsub("\n", " ", basket_summary$basket_label),
+  basket_summary$draws,
+  basket_summary$median_best_ir,
+  basket_summary$best_ir_q05,
+  basket_summary$best_ir_q95,
+  basket_summary$median_delta_ir,
+  100 * basket_summary$probability_gain
+)
+
+format_precision <- function(x) {
+  ifelse(is.finite(x), sprintf("%.0f\\%%", 100 * x), "--")
+}
+precision_table_rows <- sprintf(
+  "%d & %s & %s & %.2f & & & & \\\\",
+  precision_thresholds$basket_size,
+  format_precision(precision_thresholds$min_precision_positive),
+  format_precision(precision_thresholds$min_precision_likely),
+  precision_thresholds$delta_at_full_precision
+)
+
+picker_table_tex <- c(
+  "\\begin{table}[p]",
+  "\\captionsetup{justification=raggedright,labelsep=none,singlelinecheck=false,labelformat=boldlabel}",
+  "\\renewcommand{\\arraystretch}{1.02}",
+  paste0(
+    "\\caption[Table 6: \\footnotesize ]{\\footnotesize \\textbf{: Fund-picking ",
+    "robustness of the RP--human frontier.} RP is the pre-specified ML portfolio ",
+    "because it is a transparent, risk-controlled ensemble; it was not selected ",
+    "because it produced the strongest result. ML returns are net of transaction ",
+    "costs and the 1\\% annual management fee. All Information Ratios use 15th-to-15th ",
+    "monthly returns and the IBOV as benchmark, and are computed as the annualized ",
+    "arithmetic mean active return divided by the tracking error, matching ",
+    "Table~\\ref{combofront} rather than the geometric convention of ",
+    "Table~\\ref{actret}. Panel A ranks funds over the full ",
+    "evaluation window and varies the retained top share. Human IR and RP IR are ",
+    "standalone values; Best IR is the maximum over RP--human weights from zero to ",
+    "one in five-percentage-point increments, and $w^{*}$ is the corresponding RP ",
+    "weight. $\\Delta$IR is Best IR minus the better standalone IR. Brackets report ",
+    "95\\% intervals from 999 joint circular 12-month block-bootstrap samples, with ",
+    "funds re-ranked inside every sample. Panel B draws 1,000 fixed equal-weight ",
+    "baskets without replacement from the ex-post top quartile. P5 and P95 describe ",
+    "basket-selection dispersion, not confidence intervals. Panel C uses 500 baskets ",
+    "per cell and controls the fraction selected from the ex-post top quartile; ",
+    "Min. positive is the lowest precision with positive median $\\Delta$IR, which ",
+    "is equivalent to $P(\\Delta\\mathrm{IR}>0)>50\\%$ because $\\Delta$IR is ",
+    "non-negative by construction; Min. likely is the stricter crossing at ",
+    "$P(\\Delta\\mathrm{IR}>0)\\geq 75\\%$. The ",
+    "final row replaces full-window ranking with a trailing 12-month, past-only ",
+    "top-quartile rule.}"
+  ),
+  "\\scriptsize",
+  "\\setlength{\\tabcolsep}{3pt}",
+  "\\begin{tabularx}{\\linewidth}{>{\\raggedright\\arraybackslash}m{1.7cm}*{7}{>{\\raggedleft\\arraybackslash}X}}",
+  "\\hline",
+  "\\multicolumn{8}{l}{\\textit{Panel A: oracle top-share sensitivity (RP)}} \\\\",
+  "Top share & Funds & Human IR & RP IR & Best IR & $\\Delta$IR & $w^{*}$ & 95\\% CI $\\Delta$IR \\\\",
+  "\\hline",
+  oracle_table_rows,
+  "\\hline",
+  "\\multicolumn{8}{l}{\\textit{Panel B: fixed baskets sampled from the oracle top quartile}} \\\\",
+  "Funds & Draws & Median best & P5 & P95 & Median $\\Delta$IR & $P(\\Delta>0)$ & \\\\",
+  "\\hline",
+  basket_table_rows,
+  "\\hline",
+  "\\multicolumn{8}{l}{\\textit{Panel C: calibrated picker precision}} \\\\",
+  "Funds & Min. positive & Min. likely & $\\Delta$IR at 100\\% & & & & \\\\",
+  "\\hline",
+  precision_table_rows,
+  "\\hline",
+  sprintf(
+    "\\multicolumn{8}{l}{\\textit{Past-only Q75 (12m, $T=%d$): Human %.2f; Best %.2f; $\\Delta$IR %.2f; $w^{*}$ %.0f\\%%.}} \\\\",
+    length(trailing_eval_idx),
+    trailing_result$ir_human,
+    trailing_result$ir_best,
+    trailing_result$delta_ir,
+    100 * trailing_result$w_ir
+  ),
+  "\\hline",
+  "\\end{tabularx}",
+  "\\label{fundpickerrobust}",
+  "\\end{table}"
+)
+writeLines(picker_table_tex, here::here("tables", "fund_picker_robustness.tex"))
+
+picker_figures_tex <- c(
+  latex_figure(
+    "fund_picker_quantile_sensitivity.png", 13,
+    "Fund-picking sensitivity of the combination frontier.",
+    paste(
+      "Funds are ranked by their full-window 15th-to-15th geometric return, and the",
+      "retained share varies from the top 50\\% to the top 5\\%. Red lines show the",
+      "Information Ratio of the equal-weight human portfolio; blue lines show the",
+      "maximum Information Ratio over five-percentage-point combinations with each",
+      "ML portfolio. RP is highlighted because it is the pre-specified transparent,",
+      "risk-controlled ensemble, not because it is ex-post best; the other seven ML",
+      "schemes show whether the quantile pattern generalizes. The dotted line marks",
+      "the baseline top quartile. In the RP panel, shading is the 95\\% interval from",
+      "999 joint circular 12-month block-bootstrap samples with funds re-ranked in",
+      "each sample. Because the main rankings use the full window, these curves are",
+      "oracle sensitivity bounds rather than implementable investment strategies."
+    ),
+    "fig:picker_quantile"
+  ),
+  "",
+  latex_figure(
+    "fund_picker_basket_size.png", 14,
+    "Top-performer basket size.",
+    paste(
+      "Each draw samples, without replacement, a fixed equal-weight basket from the",
+      "funds ranked in the ex-post top quartile and holds that basket throughout the",
+      "evaluation window. For each basket size, 1,000 draws are combined with RP over",
+      "a five-percentage-point weight grid. The solid line is the median attainable",
+      "Information Ratio and the band spans its 5th to 95th percentiles across basket",
+      "draws. The dashed line is standalone RP; the final point includes every",
+      "top-quartile fund. The band therefore measures fund-selection dispersion, not",
+      "time-series sampling uncertainty, and the ex-post top-quartile restriction",
+      "makes the exercise an oracle diversification benchmark."
+    ),
+    "fig:picker_basket"
+  ),
+  "",
+  latex_figure(
+    "fund_picker_precision.png", 15,
+    "Fund-picker precision.",
+    paste(
+      "For basket sizes 4, 8, 20 and 40, a controlled fraction of funds is sampled",
+      "without replacement from the ex-post top quartile and the remainder from the",
+      "other eligible funds. Each cell summarizes 500 fixed equal-weight baskets.",
+      "Every basket is combined with RP over a five-percentage-point weight grid.",
+      "Cell colour and the first number report the median incremental Information",
+      "Ratio relative to the better standalone RP or human basket; the parenthesized",
+      "number is the fraction of draws with a positive increment. The exercise",
+      "calibrates how accurately an investor must identify eventual winners, but",
+      "because winner status uses the full window it is not an implementable picker."
+    ),
+    "fig:picker_precision"
+  )
+)
+writeLines(
+  picker_figures_tex,
+  here::here("figures", "fund_picker_robustness_figures.tex")
+)
+
+# ---- Mean-variance spanning -------------------------------------------------
+# For Y = alpha + B X + epsilon, spanning imposes alpha = 0 and B 1 = 1
+# for every test asset. We report both directions and use a restricted-residual
+# circular block bootstrap to preserve serial and cross-series dependence.
+spanning_wald_stat <- function(benchmark_returns, test_returns) {
+  benchmark_returns <- as.matrix(benchmark_returns)
+  test_returns <- as.matrix(test_returns)
+  if (nrow(benchmark_returns) != nrow(test_returns) ||
+      any(!is.finite(benchmark_returns)) || any(!is.finite(test_returns))) {
+    rlang::abort("Spanning-test return matrices must be finite and row-aligned.")
+  }
+  design <- cbind(intercept = 1, benchmark_returns)
+  if (qr(design)$rank < ncol(design)) {
+    rlang::abort("The spanning-test benchmark design matrix is rank deficient.")
+  }
+  xtx_inv <- solve(crossprod(design))
+  coefficients <- xtx_inv %*% crossprod(design, test_returns)
+  residuals <- test_returns - design %*% coefficients
+  sigma <- crossprod(residuals) / (nrow(design) - ncol(design))
+  restriction_one <- rbind(
+    c(1, rep(0, ncol(benchmark_returns))),
+    c(0, rep(1, ncol(benchmark_returns)))
+  )
+  restriction <- kronecker(diag(ncol(test_returns)), restriction_one)
+  target <- rep(c(0, 1), ncol(test_returns))
+  gap <- as.vector(restriction %*% as.vector(coefficients) - target)
+  coefficient_vcov <- kronecker(sigma, xtx_inv)
+  gap_vcov <- restriction %*% coefficient_vcov %*% t(restriction)
+  if (rcond(gap_vcov) < 1e-12) {
+    rlang::abort("The spanning-test restriction covariance is numerically singular.")
+  }
+  statistic <- as.numeric(crossprod(gap, solve(gap_vcov, gap)))
+  list(
+    statistic = statistic,
+    df = length(gap),
+    coefficients = coefficients,
+    residuals = residuals,
+    design = design,
+    restriction_one = restriction_one,
+    xtx_inv = xtx_inv
+  )
+}
+
+spanning_test <- function(
+    benchmark_returns,
+    test_returns,
+    bootstrap_reps = 999L,
+    block_length = 12L,
+    seed = 1L) {
+  observed <- spanning_wald_stat(benchmark_returns, test_returns)
+  constraint_target <- c(0, 1)
+  restricted_coefficients <- apply(
+    observed$coefficients,
+    2,
+    function(coefficient) {
+      middle <- observed$restriction_one %*% observed$xtx_inv %*%
+        t(observed$restriction_one)
+      coefficient - observed$xtx_inv %*% t(observed$restriction_one) %*%
+        solve(
+          middle,
+          observed$restriction_one %*% coefficient - constraint_target
+        )
+    }
+  )
+  restricted_fitted <- observed$design %*% restricted_coefficients
+  restricted_residuals <- test_returns - restricted_fitted
+  restricted_residuals <- scale(
+    restricted_residuals,
+    center = TRUE,
+    scale = FALSE
+  )
+
+  set.seed(seed)
+  bootstrap_statistics <- vapply(seq_len(bootstrap_reps), function(draw) {
+    idx <- circular_block_indices(nrow(observed$design), block_length)
+    test_star <- restricted_fitted + restricted_residuals[idx, , drop = FALSE]
+    spanning_wald_stat(benchmark_returns, test_star)$statistic
+  }, numeric(1))
+
+  tibble::tibble(
+    statistic = observed$statistic,
+    df = observed$df,
+    asymptotic_p = stats::pchisq(observed$statistic, observed$df, lower.tail = FALSE),
+    bootstrap_p = (1 + sum(bootstrap_statistics >= observed$statistic)) /
+      (bootstrap_reps + 1),
+    bootstrap_reps = bootstrap_reps,
+    block_length = block_length,
+    design_condition = kappa(observed$design)
+  )
+}
+
+max_long_only_ratio <- function(return_matrix, reference_returns) {
+  return_matrix <- as.matrix(return_matrix)
+  if (nrow(return_matrix) != length(reference_returns) ||
+      any(!is.finite(return_matrix)) || any(!is.finite(reference_returns))) {
+    rlang::abort("Long-only ratio inputs must be finite and row-aligned.")
+  }
+  centered <- sweep(return_matrix, 1, reference_returns, "-")
+  n_assets <- ncol(centered)
+  objective <- function(weights) {
+    portfolio <- as.numeric(centered %*% weights)
+    portfolio_sd <- stats::sd(portfolio)
+    if (!is.finite(portfolio_sd) || portfolio_sd <= 0) return(1e6)
+    -mean(portfolio) / portfolio_sd * sqrt(12)
+  }
+  starts <- rbind(rep(1 / n_assets, n_assets), diag(n_assets))
+  solutions <- lapply(seq_len(nrow(starts)), function(i) {
+    nloptr::slsqp(
+      x0 = starts[i, ],
+      fn = objective,
+      lower = rep(0, n_assets),
+      upper = rep(1, n_assets),
+      heq = function(weights) sum(weights) - 1,
+      control = list(xtol_rel = 1e-10, maxeval = 1000, print_level = 0),
+      deprecatedBehavior = FALSE
+    )
+  })
+  valid <- vapply(
+    solutions,
+    function(solution) {
+      solution$convergence > 0 &&
+        all(is.finite(solution$par)) &&
+        abs(sum(solution$par) - 1) < 1e-6 &&
+        all(solution$par >= -1e-8)
+    },
+    logical(1)
+  )
+  if (!any(valid)) rlang::abort("The long-only ratio optimization did not converge.")
+  objectives <- vapply(solutions[valid], function(solution) solution$value, numeric(1))
+  best <- solutions[valid][[which.min(objectives)]]
+  list(ratio = -best$value, weights = best$par)
+}
+
+spanning_ml_names <- c("RP", "CS", "MVO_BOX")
+if (!all(spanning_ml_names %in% colnames(ml_ret_mat))) {
+  rlang::abort("One or more pre-specified spanning-test ML portfolios are missing.")
+}
+spanning_ml <- ml_ret_mat[, spanning_ml_names, drop = FALSE]
+spanning_human <- perf_mat[, c("FUNDS_MEAN", "FUNDS_Q75"), drop = FALSE]
+
+spanning_specs <- list(
+  "ML spans human" = list(benchmark = spanning_ml, test = spanning_human),
+  "Human spans ML" = list(benchmark = spanning_human, test = spanning_ml)
+)
+
+spanning_results <- purrr::imap_dfr(spanning_specs, function(spec, direction) {
+  test_result <- spanning_test(
+    spec$benchmark,
+    spec$test,
+    bootstrap_reps = 999L,
+    block_length = 12L,
+    seed = if (direction == "ML spans human") 20260730L else 20260731L
+  )
+  # Per-test-asset intercepts drive the joint rejection, so report them: a
+  # sufficiently NEGATIVE alpha also rejects spanning, but only a short seller
+  # could exploit it. Reporting the sign keeps the long-only reading honest.
+  fit <- spanning_wald_stat(spec$benchmark, spec$test)
+  resid_vcov <- crossprod(fit$residuals) /
+    (nrow(fit$design) - ncol(fit$design))
+  alpha_hat <- fit$coefficients[1, ]
+  alpha_se <- sqrt(diag(resid_vcov) * fit$xtx_inv[1, 1])
+  alpha_note <- paste(
+    sprintf(
+      "%s $\\alpha$ %.2f ($t$ %.2f)",
+      gsub("_", "\\\\_", colnames(spec$test)), alpha_hat, alpha_hat / alpha_se
+    ),
+    collapse = "; "
+  )
+  expanded <- cbind(spec$benchmark, spec$test)
+  benchmark_sharpe <- max_long_only_ratio(spec$benchmark, rf_vec)$ratio
+  expanded_sharpe <- max_long_only_ratio(expanded, rf_vec)$ratio
+  benchmark_ir <- max_long_only_ratio(spec$benchmark, bench_fund_vec)$ratio
+  expanded_ir <- max_long_only_ratio(expanded, bench_fund_vec)$ratio
+  test_result %>%
+    dplyr::mutate(
+      direction = direction,
+      benchmark_assets = paste(colnames(spec$benchmark), collapse = ", "),
+      test_assets = paste(colnames(spec$test), collapse = ", "),
+      alpha_note = alpha_note,
+      delta_sharpe = max(0, expanded_sharpe - benchmark_sharpe),
+      delta_ir = max(0, expanded_ir - benchmark_ir),
+      .before = 1
+    )
+})
+
+spanning_table_rows <- sprintf(
+  "%s & %d & %d & %.2f & %d & %.3f & %.3f & %.2f & %.3f & %.3f \\\\",
+  spanning_results$direction,
+  vapply(spanning_specs, function(x) ncol(x$benchmark), integer(1)),
+  vapply(spanning_specs, function(x) ncol(x$test), integer(1)),
+  spanning_results$statistic,
+  spanning_results$df,
+  spanning_results$asymptotic_p,
+  spanning_results$bootstrap_p,
+  spanning_results$design_condition,
+  spanning_results$delta_sharpe,
+  spanning_results$delta_ir
+)
+
+spanning_table_tex <- c(
+  "\\begin{table}[h]",
+  "\\captionsetup{justification=raggedright,labelsep=none,singlelinecheck=false,labelformat=boldlabel}",
+  paste0(
+    "\\caption[Table 7: \\footnotesize ]{\\footnotesize \\textbf{: Two-direction ",
+    "mean--variance spanning tests.} For $Y_t=\\alpha+B X_t+\\varepsilon_t$, the ",
+    "joint restrictions $\\alpha=0$ and $B\\mathbf{1}=\\mathbf{1}$ state that the ",
+    "$K$ benchmark assets span the mean--variance opportunity set of the $N$ test ",
+    "assets. Rejection means the test assets shift the unconstrained mean--variance ",
+    "frontier, which a sufficiently negative intercept achieves through a short ",
+    "sale; the economically relevant magnitudes for a long-only investor are ",
+    "therefore $\\Delta$SR and $\\Delta$IR, and the intercepts reported beneath the ",
+    "table show the direction of each deviation. ",
+    "In ``ML spans human'', $X$ contains RP, CS and MVO\\_BOX and ",
+    "$Y$ contains FUNDS\\_MEAN and the ex-post FUNDS\\_Q75; the reverse row swaps ",
+    "the sets. The three ML portfolios are pre-specified representatives of a ",
+    "risk-controlled ensemble, direct signal weighting and constrained ",
+    "mean--variance optimization, keeping the benchmark dimension modest rather ",
+    "than selecting portfolios by performance. $p_{\\chi^2}$ is the asymptotic Wald ",
+    "p-value; $p_{BB}$ uses 999 restricted-residual circular 12-month block-bootstrap ",
+    "replications. $\\kappa(X)$ is the condition number of the regression design. ",
+    "$\\Delta$SR and $\\Delta$IR are increases in the maximum long-only Sharpe ratio ",
+    "relative to CDI and Information Ratio relative to IBOV after adding the test ",
+    "assets. Results are conditional on the common full evaluation window and, for ",
+    "FUNDS\\_Q75, an ex-post fund classification.}"
+  ),
+  "\\scriptsize",
+  "\\setlength{\\tabcolsep}{3pt}",
+  "\\begin{tabularx}{\\linewidth}{>{\\raggedright\\arraybackslash}m{2.5cm}*{9}{>{\\raggedleft\\arraybackslash}X}}",
+  "\\hline",
+  "Direction & $K$ & $N$ & Wald & df & $p_{\\chi^2}$ & $p_{BB}$ & $\\kappa(X)$ & $\\Delta$SR & $\\Delta$IR \\\\",
+  "\\hline",
+  spanning_table_rows,
+  "\\hline",
+  # A paragraph column so the intercept notes wrap instead of overfilling the
+  # line; `l` would overflow \linewidth for the three-asset direction.
+  sprintf(
+    "\\multicolumn{10}{@{}p{0.98\\linewidth}@{}}{\\textit{%s: %s (percent per month).}} \\\\",
+    spanning_results$direction, spanning_results$alpha_note
+  ),
+  "\\hline",
+  "\\end{tabularx}",
+  "\\label{spanningtests}",
+  "\\end{table}"
+)
+writeLines(spanning_table_tex, here::here("tables", "spanning_tests.tex"))
 
 # Keep the manuscript's figure assets synchronized with the generated outputs.
 generated_figure_files <- c(
@@ -1890,7 +2742,10 @@ generated_figure_files <- c(
   "cumulative_return.png",
   "correlogram_predictions.png",
   "correlogram_performance.png",
-  "combination_frontier.png"
+  "combination_frontier.png",
+  "fund_picker_quantile_sensitivity.png",
+  "fund_picker_basket_size.png",
+  "fund_picker_precision.png"
 )
 latex_figure_dir <- here::here("latex_paper", "figures")
 dir.create(latex_figure_dir, recursive = TRUE, showWarnings = FALSE)

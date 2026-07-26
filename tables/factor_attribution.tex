@@ -6,10 +6,10 @@
   labelformat=boldlabel,
 }
 \renewcommand{\arraystretch}{1.2}
-\caption[Table 5: \footnotesize ]{\footnotesize \textbf{: Long-only factor attribution of portfolio returns.} Each portfolio's monthly excess return over the CDI is regressed on a market factor and five market-neutralized style factors built from long-only cap-scaled signal portfolios: MKT is the benchmark (IBOV) excess return over CDI, and HML (be\_me), MOM (prc\_ret\_12m\_1m), RMW (gp\_at\_12m), SMB (log\_mkt\_cap) and CMA (assets\_gr1y\_tr) are each the long-only signal portfolio minus the benchmark (an active/tilt return). This is a returns-based style attribution, not a risk-premium test: loadings are style tilts and $\alpha$ (percent per month) is the active return unexplained by the basis. Fund, IBOV and CDI daily returns are geometrically compounded from the previous calendar 15th through the current calendar 15th, matching the ML and factor-portfolio timing. MKT is therefore the contemporaneous market loading. Estimates are shown with t-statistics in parentheses; $R^2$ is the regression fit. MED\_FUND and MED\_FUND\_Q75 regress each fund individually and report the median loading across (all / top-quartile) funds.}
+\caption[Table 5: \footnotesize ]{\footnotesize \textbf{: Long-only factor attribution of portfolio returns.} Each portfolio's monthly excess return over the CDI is regressed on a market factor and five market-neutralized style factors built from long-only cap-scaled signal portfolios: MKT is the benchmark (IBOV) excess return over CDI, and HML (be\_me), MOM (prc\_ret\_12m\_1m), RMW (gp\_at\_12m), SMB (log\_mkt\_cap) and CMA (assets\_gr1y\_tr) are each the long-only signal portfolio minus the benchmark (an active/tilt return). This is a returns-based style attribution, not a risk-premium test: loadings are style tilts and $\alpha$ (percent per month) is the active return unexplained by the basis. Fund, IBOV and CDI daily returns are geometrically compounded from the previous calendar 15th through the current calendar 15th, matching the ML and factor-portfolio timing. MKT is therefore the contemporaneous market loading. Estimates are shown with t-statistics in parentheses; $R^2$ is the regression fit. MED and MED\_Q75 regress each fund individually and report the median loading across (all / top-quartile) funds.}
 \scriptsize
 \setlength{\tabcolsep}{3pt}
-\begin{tabularx}{\linewidth}{>{\raggedright\arraybackslash}m{1.6cm}*{8}{>{\raggedleft\arraybackslash}X}}
+\begin{tabularx}{\linewidth}{>{\raggedright\arraybackslash}m{2.3cm}*{8}{>{\raggedleft\arraybackslash}X}}
 \hline
 Portfolio & $\alpha$ & MKT & HML & MOM & RMW & SMB & CMA & $R^2$ \\
 \hline
@@ -37,9 +37,9 @@ FUNDS\_MEAN & -0.087 & 0.85 & 0.03 & 0.12 & 0.22 & 0.05 & -0.05 & 0.99 \\
 FUNDS\_Q75 & 0.284 & 0.81 & 0.11 & 0.13 & 0.14 & 0.05 & -0.12 & 0.99 \\
  & (3.60) & (62.09) & (3.42) & (4.42) & (4.45) & (1.86) & (-3.00) & \\
 \multicolumn{9}{l}{\textit{Benchmarks --- representative single fund (median across funds)}} \\
-MED\_FUND & -0.093 & 0.89 & 0.01 & 0.11 & 0.21 & 0.05 & -0.02 & 0.91 \\
+MED & -0.093 & 0.89 & 0.01 & 0.11 & 0.21 & 0.05 & -0.02 & 0.91 \\
  & (-0.37) & (19.02) & (0.13) & (1.09) & (1.72) & (0.68) & (-0.18) & \\
-MED\_FUND\_Q75 & 0.205 & 0.86 & 0.03 & 0.10 & 0.13 & 0.03 & -0.01 & 0.89 \\
+MED\_Q75 & 0.205 & 0.86 & 0.03 & 0.10 & 0.13 & 0.03 & -0.01 & 0.89 \\
  & (0.61) & (17.26) & (0.33) & (1.15) & (1.10) & (0.53) & (-0.18) & \\
 \hline
 \end{tabularx}

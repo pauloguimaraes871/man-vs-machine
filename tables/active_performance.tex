@@ -6,9 +6,10 @@
   labelformat=boldlabel,
 }
 \renewcommand{\arraystretch}{1.25}
-\caption[Table 3: \footnotesize ]{\footnotesize \textbf{: Out-of-sample net active summary statistics of the ML Ensemble.} This table reports out-of-sample net active summary statistics for the ML Ensemble portfolios and the human-manager benchmarks. The ML Ensemble averages the return predictions across all ML models (OLS, Elastic Net, Random Forest, XGBoost and three neural networks) before portfolio construction; the ML rows differ only by the portfolio-construction scheme. Annualized Active Geometric Return (Ret.), Tracking Error (TE), Information Ratio (IR), Active Expected Shortfall (AES), Active Ulcer Index (Ulcer), Annualized Active Martin Ratio (MR), CAPM alpha ($\alpha$, in percent per month) and its t-statistic ($t(\alpha)$) are displayed. ML portfolio returns are net of transaction costs and of a 1\% p.a. management fee. The human-manager benchmarks come in two forms. FUNDS\_MEAN and FUNDS\_Q75 apply the metrics to a single aggregated return series --- an equally weighted portfolio of, respectively, all eligible funds and the top-quartile eligible funds (ranked by mean return over the evaluation window) --- and therefore embed the diversification of holding many funds at once. MED\_FUND and MED\_FUND\_Q75 instead compute each metric for every fund individually and then report the median across funds, describing the experience of an investor who picks a single (respectively, any or top-quartile) fund. Every human-manager benchmark uses the same universe of funds with at least 36 monthly observations. The median (rather than the mean) is used because averaging non-linear ratios across funds is dominated by small-denominator outliers; the reported ratios and $t(\alpha)$ are therefore cross-fund medians of fund-level quantities, not statistics of a tradable portfolio.}
-\footnotesize
-\begin{tabularx}{\linewidth}{>{\raggedright\arraybackslash}m{2.5cm}*{8}{>{\raggedleft\arraybackslash}X}}
+\caption[Table 3: \footnotesize ]{\footnotesize \textbf{: Out-of-sample net active summary statistics of the ML Ensemble.} This table reports out-of-sample net active summary statistics for the ML Ensemble portfolios and the human-manager benchmarks. The ML Ensemble averages the return predictions across all ML models (OLS, Elastic Net, Random Forest, XGBoost and three neural networks) before portfolio construction; the ML rows differ only by the portfolio-construction scheme. Annualized Active Geometric Return (Ret.), Tracking Error (TE), Information Ratio (IR), Active Expected Shortfall (AES), Active Ulcer Index (Ulcer), Annualized Active Martin Ratio (MR), CAPM alpha ($\alpha$, in percent per month) and its t-statistic ($t(\alpha)$) are displayed. IR here is the geometrically compounded annualized active return divided by the tracking error; the combination and fund-picking tables use the arithmetic-mean convention and therefore report systematically lower values for the same portfolios. ML portfolio returns are net of transaction costs and of a 1\% p.a. management fee. The human-manager benchmarks come in two forms. FUNDS\_MEAN and FUNDS\_Q75 apply the metrics to a single aggregated return series --- an equally weighted portfolio of, respectively, all eligible funds and the top-quartile eligible funds (ranked by mean return over the evaluation window) --- and therefore embed the diversification of holding many funds at once. MED and MED\_Q75 instead compute each metric for every fund individually and then report the median across funds, describing the experience of an investor who picks a single (respectively, any or top-quartile) fund. Every human-manager benchmark uses the same universe of funds with at least 36 monthly observations. The median (rather than the mean) is used because averaging non-linear ratios across funds is dominated by small-denominator outliers; the reported ratios and $t(\alpha)$ are therefore cross-fund medians of fund-level quantities, not statistics of a tradable portfolio.}
+\scriptsize
+\setlength{\tabcolsep}{3pt}
+\begin{tabularx}{\linewidth}{>{\raggedright\arraybackslash}m{2.7cm}*{8}{>{\raggedleft\arraybackslash}X}}
 \hline
 Portfolio & Ret. & TE & IR & AES & Ulcer & MR & $\alpha$ & $t(\alpha)$ \\
 \hline
@@ -27,8 +28,8 @@ FUNDS\_MEAN & -0.011 & 0.058 & -0.18 & 0.031 & 0.089 & -0.12 & 0.036 & 0.27 \\
 FUNDS\_Q75 & 0.042 & 0.059 & 0.71 & 0.025 & 0.029 & 1.48 & 0.491 & 4.27 \\
 \hline
 \multicolumn{9}{l}{\textit{Benchmarks --- representative single fund (median across funds)}} \\
-MED\_FUND & -0.020 & 0.100 & -0.25 & 0.061 & 0.156 & -0.14 & -0.072 & -0.24 \\
-MED\_FUND\_Q75 & 0.019 & 0.111 & 0.16 & 0.061 & 0.096 & 0.18 & 0.313 & 1.11 \\
+MED & -0.020 & 0.100 & -0.25 & 0.061 & 0.156 & -0.14 & -0.072 & -0.24 \\
+MED\_Q75 & 0.019 & 0.111 & 0.16 & 0.061 & 0.096 & 0.18 & 0.313 & 1.11 \\
 \hline
 \end{tabularx}
 \label{actret}
