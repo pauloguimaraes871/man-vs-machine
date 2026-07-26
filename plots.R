@@ -186,6 +186,27 @@ top_funds <- colnames(fund_ret_window)[top_cols]
 reliable_top_funds <- top_funds
 funds_q75 <- rowMeans(fund_ret_window[, top_funds, drop = FALSE], na.rm = TRUE)
 
+# Two caveats on the ranking statistic, quantified here so the captions can cite
+# measured numbers rather than assertions.
+#   (i) The score is the ARITHMETIC mean of monthly returns, which rewards
+#       volatility relative to a compounded (geometric) score. Overlap with a
+#       geometric ranking measures how much that matters.
+#  (ii) Funds enter with different history lengths, so a fund observed over a
+#       short favourable stretch competes with one observed throughout.
+fund_geo_score <- apply(fund_ret_window, 2, function(x) {
+  x <- x[is.finite(x)]
+  if (length(x) == 0L) return(NA_real_)
+  (prod(1 + x / 100)^(1 / length(x)) - 1) * 100
+})
+geo_top_funds <- colnames(fund_ret_window)[
+  !is.na(fund_geo_score) &
+    fund_geo_score >= stats::quantile(fund_geo_score, 0.75, na.rm = TRUE)
+]
+rank_overlap_pct <- 100 * length(intersect(reliable_top_funds, geo_top_funds)) /
+  length(reliable_top_funds)
+rank_partial_history_pct <- 100 *
+  sum(fund_obs[reliable_top_funds] < length(ml_index)) / length(reliable_top_funds)
+
 funds_benchmarks <- tibble::tibble(
   date              = ml_index,
   funds_mean        = funds_mean,
@@ -363,7 +384,8 @@ ensemble_table_tex <- c(
   "}",
   "\\renewcommand{\\arraystretch}{1.25}",
   paste0(
-    "\\caption[Table 3: \\footnotesize ]{\\footnotesize \\textbf{: Out-of-sample ",
+    "\\caption[Out-of-sample net active summary statistics of the ML Ensemble]",
+    "{\\footnotesize \\textbf{: Out-of-sample ",
     "net active summary statistics of the ML Ensemble.} This table reports ",
     "out-of-sample net active summary statistics for the ML Ensemble portfolios and ",
     "the human-manager benchmarks. The ML Ensemble averages the return predictions ",
@@ -389,7 +411,10 @@ ensemble_table_tex <- c(
     "report the median across funds, describing the experience of an investor who ",
     "picks a single (respectively, any or top-quartile) fund. Every human-manager ",
     "benchmark uses the same universe of funds with at least 36 monthly observations. ",
-    "The median (rather ",
+    "Because that screen admits funds with partial histories, top-quartile ",
+    "membership is assigned over differing sample lengths; ",
+    "Figure~\\ref{fig:picker_quantile} quantifies how far the classification and ",
+    "the resulting Information Ratios depend on that choice. The median (rather ",
     "than the mean) is used because averaging non-linear ratios across funds is ",
     "dominated by small-denominator outliers; the reported ratios and $t(\\alpha)$ ",
     "are therefore cross-fund medians of fund-level quantities, not statistics of a ",
@@ -474,7 +499,8 @@ model_table_tex <- c(
   "}",
   "\\renewcommand{\\arraystretch}{1.25}",
   paste0(
-    "\\caption[Table 4: \\footnotesize ]{\\footnotesize \\textbf{: Out-of-sample ",
+    "\\caption[Out-of-sample net active summary statistics across ML models]",
+    "{\\footnotesize \\textbf{: Out-of-sample ",
     "net active summary statistics across ML models.} This table reports ",
     "out-of-sample net active summary statistics for portfolios built from each ",
     "individual ML model, under Cross-Sectional (CS) and Risk-Parity (RP) ",
@@ -530,7 +556,10 @@ journal_area_theme <- function(base_size = plot_base_size) {
 # Paste-ready LaTeX figure block. Requires \usepackage{graphicx} and
 # \usepackage{caption}. The image path is relative to the manuscript .tex;
 # adjust `fig_dir` if figures/ sits elsewhere.
-latex_figure <- function(file, fig_num, bold_title, body, label, fig_dir = "figures") {
+# No float number is emitted: LaTeX auto-numbers the float, and a hard-coded
+# number in the optional (list-of-figures) argument silently goes stale whenever
+# floats are reordered. The short caption is the title instead.
+latex_figure <- function(file, bold_title, body, label, fig_dir = "figures") {
   c(
     "\\begin{figure}[htbp]",
     "\\centering",
@@ -540,8 +569,8 @@ latex_figure <- function(file, fig_num, bold_title, body, label, fig_dir = "figu
     "  singlelinecheck=false,",
     "  labelformat=boldlabel,",
     "}",
-    sprintf("\\caption[Figure %d: \\footnotesize ]{\\footnotesize \\textbf{: %s} %s}",
-            fig_num, bold_title, body),
+    sprintf("\\caption[%s]{\\footnotesize \\textbf{: %s} %s}",
+            bold_title, bold_title, body),
     sprintf("\\includegraphics[width=\\linewidth]{%s/%s}", fig_dir, file),
     sprintf("\\label{%s}", label),
     "\\end{figure}"
@@ -646,7 +675,7 @@ ggplot2::ggsave(here::here("figures", "feature_importance_heatmap.png"),
 # ---- Paste-ready LaTeX for the feature-importance figures ------------------
 feature_importance_figures_tex <- c(
   latex_figure(
-    "feature_importance_bar.png", 1,
+    "feature_importance_bar.png",
     "Net feature importance by theme across ML models (last period).",
     paste(
       "Net (signed sum of) normalized feature importance within each signal",
@@ -661,7 +690,7 @@ feature_importance_figures_tex <- c(
   ),
   "",
   latex_figure(
-    "feature_importance_heatmap.png", 2,
+    "feature_importance_heatmap.png",
     "Net feature importance by theme over time across ML models.",
     paste(
       "Net (signed sum of) normalized feature importance per signal theme at",
@@ -832,7 +861,7 @@ ggplot2::ggsave(here::here("figures", "composition_liquidity_weight.png"),
 # ---- Paste-ready LaTeX for the composition figures -------------------------
 composition_figures_tex <- c(
   latex_figure(
-    "composition_sector_weight.png", 3,
+    "composition_sector_weight.png",
     "Portfolio weight composition by sector.",
     paste(
       "Out-of-sample monthly composition of portfolio weight across economic",
@@ -845,7 +874,7 @@ composition_figures_tex <- c(
   ),
   "",
   latex_figure(
-    "composition_liquidity_weight.png", 4,
+    "composition_liquidity_weight.png",
     "Portfolio weight composition by market capitalization.",
     paste(
       "Out-of-sample monthly composition of portfolio weight across",
@@ -929,7 +958,7 @@ ggplot2::ggsave(here::here("figures", "portfolio_characteristics.png"),
 
 # ---- Paste-ready LaTeX for the portfolio-characteristics figure ------------
 portfolio_characteristics_figures_tex <- latex_figure(
-  "portfolio_characteristics.png", 5,
+  "portfolio_characteristics.png",
   "Average portfolio characteristics over time.",
   paste(
     "Weighted-average stock characteristics of each ML-ensemble portfolio",
@@ -1090,7 +1119,8 @@ factor_table_tex <- c(
   "}",
   "\\renewcommand{\\arraystretch}{1.2}",
   paste0(
-    "\\caption[Table 5: \\footnotesize ]{\\footnotesize \\textbf{: Long-only factor ",
+    "\\caption[Long-only factor attribution of portfolio returns]",
+    "{\\footnotesize \\textbf{: Long-only factor ",
     "attribution of portfolio returns.} Each portfolio's monthly excess return over ",
     "the CDI is regressed on a market factor and five market-neutralized style ",
     "factors built from long-only cap-scaled signal portfolios: MKT is the benchmark ",
@@ -1194,7 +1224,7 @@ ggplot2::ggsave(here::here("figures", "hierarchical_feature_importance.png"),
 
 # ---- Paste-ready LaTeX for the hierarchical feature-importance figure ------
 hierarchical_fi_figure_tex <- latex_figure(
-  "hierarchical_feature_importance.png", 6,
+  "hierarchical_feature_importance.png",
   "Hierarchical feature-importance decomposition.",
   paste(
     "Decomposition of feature importance from the individual signals through the",
@@ -1261,7 +1291,7 @@ ggplot2::ggsave(here::here("figures", "surrogate_fit.png"),
 
 # ---- Paste-ready LaTeX for the surrogate-fit figure ------------------------
 surrogate_fit_figure_tex <- latex_figure(
-  "surrogate_fit.png", 7,
+  "surrogate_fit.png",
   "Linear explainability of each ML model's predictions.",
   paste(
     "For each ML model (OLS, GLMNET, RF, XGB, NN1--NN3), an OLS global surrogate",
@@ -1358,7 +1388,7 @@ ggplot2::ggsave(here::here("figures", "hyperparameters_over_time.png"),
 
 # ---- Paste-ready LaTeX for the hyperparameter-over-time figure -------------
 hyperparameters_figure_tex <- latex_figure(
-  "hyperparameters_over_time.png", 8,
+  "hyperparameters_over_time.png",
   "Selected hyperparameters over time.",
   paste(
     "Bayesian-tuned hyperparameter values chosen at each walk-forward refit, for",
@@ -1466,7 +1496,7 @@ ggplot2::ggsave(here::here("figures", "cumulative_return.png"),
 
 # ---- Paste-ready LaTeX for the cumulative-return figure --------------------
 cumulative_return_figure_tex <- latex_figure(
-  "cumulative_return.png", 9,
+  "cumulative_return.png",
   "Cumulative net return: ML Ensemble vs. human managers.",
   paste(
     "Cumulative wealth index (compounded net monthly returns) over the",
@@ -1629,7 +1659,7 @@ ggplot2::ggsave(here::here("figures", "correlogram_performance.png"),
 # ---- Paste-ready LaTeX for the correlogram figures -------------------------
 correlogram_figures_tex <- c(
   latex_figure(
-    "correlogram_predictions.png", 10,
+    "correlogram_predictions.png",
     "Agreement across base-learner predictions.",
     paste(
       "Pairwise correlation of the out-of-sample return predictions of the seven",
@@ -1643,7 +1673,7 @@ correlogram_figures_tex <- c(
   ),
   "",
   latex_figure(
-    "correlogram_performance.png", 11,
+    "correlogram_performance.png",
     "Active return correlation: ML Ensemble portfolios vs human managers.",
     paste(
       "Monthly active return correlations (each series measured net of IBOV) among",
@@ -1856,7 +1886,8 @@ combo_table_tex <- c(
   "}",
   "\\renewcommand{\\arraystretch}{1.05}",
   paste0(
-    "\\caption[Table 6: \\footnotesize ]{\\footnotesize \\textbf{: Man-and-machine ",
+    "\\caption[Man-and-machine combination frontier]",
+    "{\\footnotesize \\textbf{: Man-and-machine ",
     "combination frontier.} Each row combines one ML Ensemble portfolio with one ",
     "human-manager benchmark over $w \\in \\{0, 0.05, \\ldots, 1\\}$. Annualized ",
     "Sharpe ratios use the CDI and Information Ratios use IBOV; all returns are ",
@@ -1891,7 +1922,7 @@ writeLines(combo_table_tex, here::here("tables", "combination_frontier.tex"))
 
 # ---- Paste-ready LaTeX for the combination-frontier figure -----------------
 combination_figure_tex <- latex_figure(
-  "combination_frontier.png", 12,
+  "combination_frontier.png",
   "Man and machine: active risk-return frontier.",
   paste(
     "Annualized active return and risk for monthly rebalanced combinations holding",
@@ -2058,9 +2089,13 @@ oracle_plot_df <- oracle_quantile_df %>%
     )
   )
 
+# The ribbon layer carries its own copy of `scheme`. It must be the SAME factor
+# as in oracle_plot_df: if one layer supplies a character and another a factor,
+# facet_wrap() falls back to alphabetical order and RP stops leading the grid.
 oracle_ribbon <- oracle_quantile_df %>%
   dplyr::filter(scheme == primary_ml_scheme) %>%
-  dplyr::left_join(oracle_bootstrap_summary, by = "top_share")
+  dplyr::left_join(oracle_bootstrap_summary, by = "top_share") %>%
+  dplyr::mutate(scheme = factor(scheme, levels = colnames(ml_ret_mat)))
 
 jp_picker <- factoRverse:::.journal_palette()
 picker_cols <- c(
@@ -2251,7 +2286,9 @@ precision_plot <- ggplot2::ggplot(
   ggplot2::geom_tile(color = "white", linewidth = 0.7) +
   ggplot2::geom_text(
     ggplot2::aes(
-      label = sprintf("%.2f\n(%d%%)", median_delta_ir, round(100 * probability_gain))
+      # Three decimals: incremental IRs here run to ~0.012, so two decimals
+      # collapse every cell to "0.00" or "0.01" and carry no information.
+      label = sprintf("%.3f\n(%d%%)", median_delta_ir, round(100 * probability_gain))
     ),
     size = 4.5,
     color = jp_picker$text
@@ -2365,7 +2402,8 @@ picker_table_tex <- c(
   "\\captionsetup{justification=raggedright,labelsep=none,singlelinecheck=false,labelformat=boldlabel}",
   "\\renewcommand{\\arraystretch}{1.02}",
   paste0(
-    "\\caption[Table 6: \\footnotesize ]{\\footnotesize \\textbf{: Fund-picking ",
+    "\\caption[Fund-picking robustness of the RP--human frontier]",
+    "{\\footnotesize \\textbf{: Fund-picking ",
     "robustness of the RP--human frontier.} RP is the pre-specified ML portfolio ",
     "because it is a transparent, risk-controlled ensemble; it was not selected ",
     "because it produced the strongest result. ML returns are net of transaction ",
@@ -2377,8 +2415,12 @@ picker_table_tex <- c(
     "evaluation window and varies the retained top share. Human IR and RP IR are ",
     "standalone values; Best IR is the maximum over RP--human weights from zero to ",
     "one in five-percentage-point increments, and $w^{*}$ is the corresponding RP ",
-    "weight. $\\Delta$IR is Best IR minus the better standalone IR. Brackets report ",
-    "95\\% intervals from 999 joint circular 12-month block-bootstrap samples, with ",
+    "weight. $\\Delta$IR is Best IR minus the better standalone IR. Because the ",
+    "weight grid contains both endpoints, $\\Delta$IR is non-negative by ",
+    "construction and is inflated by the maximization over the grid; the bracket ",
+    "is therefore a percentile band for a bounded statistic, not a two-sided ",
+    "significance interval, and a lower bound of 0.00 carries no test of a null. ",
+    "Bands come from 999 joint circular 12-month block-bootstrap samples, with ",
     "funds re-ranked inside every sample. Panel B draws 1,000 fixed equal-weight ",
     "baskets without replacement from the ex-post top quartile. P5 and P95 describe ",
     "basket-selection dispersion, not confidence intervals. Panel C uses 500 baskets ",
@@ -2395,7 +2437,7 @@ picker_table_tex <- c(
   "\\begin{tabularx}{\\linewidth}{>{\\raggedright\\arraybackslash}m{1.7cm}*{7}{>{\\raggedleft\\arraybackslash}X}}",
   "\\hline",
   "\\multicolumn{8}{l}{\\textit{Panel A: oracle top-share sensitivity (RP)}} \\\\",
-  "Top share & Funds & Human IR & RP IR & Best IR & $\\Delta$IR & $w^{*}$ & 95\\% CI $\\Delta$IR \\\\",
+  "Top share & Funds & Human IR & RP IR & Best IR & $\\Delta$IR & $w^{*}$ & 95\\% band $\\Delta$IR \\\\",
   "\\hline",
   oracle_table_rows,
   "\\hline",
@@ -2426,11 +2468,22 @@ writeLines(picker_table_tex, here::here("tables", "fund_picker_robustness.tex"))
 
 picker_figures_tex <- c(
   latex_figure(
-    "fund_picker_quantile_sensitivity.png", 13,
+    "fund_picker_quantile_sensitivity.png",
     "Fund-picking sensitivity of the combination frontier.",
     paste(
-      "Funds are ranked by their full-window 15th-to-15th geometric return, and the",
-      "retained share varies from the top 50\\% to the top 5\\%. Red lines show the",
+      sprintf(
+        paste(
+          "Funds are ranked by the arithmetic mean of their monthly 15th-to-15th",
+          "returns over the full evaluation window. That statistic mildly favours",
+          "volatile funds relative to a compounded score, but %.0f\\%% of the",
+          "top-quartile membership is unchanged under a geometric ranking. Because",
+          "eligibility requires only 36 monthly observations, %.0f\\%% of",
+          "top-quartile funds are ranked on a shorter history than the full window,",
+          "so part of the measured advantage reflects short-sample dispersion."
+        ),
+        rank_overlap_pct, rank_partial_history_pct
+      ),
+      "The retained share varies from the top 50\\% to the top 5\\%. Red lines show the",
       "Information Ratio of the equal-weight human portfolio; blue lines show the",
       "maximum Information Ratio over five-percentage-point combinations with each",
       "ML portfolio. RP is highlighted because it is the pre-specified transparent,",
@@ -2445,7 +2498,7 @@ picker_figures_tex <- c(
   ),
   "",
   latex_figure(
-    "fund_picker_basket_size.png", 14,
+    "fund_picker_basket_size.png",
     "Top-performer basket size.",
     paste(
       "Each draw samples, without replacement, a fixed equal-weight basket from the",
@@ -2462,7 +2515,7 @@ picker_figures_tex <- c(
   ),
   "",
   latex_figure(
-    "fund_picker_precision.png", 15,
+    "fund_picker_precision.png",
     "Fund-picker precision.",
     paste(
       "For basket sizes 4, 8, 20 and 40, a controlled fraction of funds is sampled",
@@ -2686,7 +2739,8 @@ spanning_table_tex <- c(
   "\\begin{table}[h]",
   "\\captionsetup{justification=raggedright,labelsep=none,singlelinecheck=false,labelformat=boldlabel}",
   paste0(
-    "\\caption[Table 7: \\footnotesize ]{\\footnotesize \\textbf{: Two-direction ",
+    "\\caption[Two-direction mean--variance spanning tests]",
+    "{\\footnotesize \\textbf{: Two-direction ",
     "mean--variance spanning tests.} For $Y_t=\\alpha+B X_t+\\varepsilon_t$, the ",
     "joint restrictions $\\alpha=0$ and $B\\mathbf{1}=\\mathbf{1}$ state that the ",
     "$K$ benchmark assets span the mean--variance opportunity set of the $N$ test ",
