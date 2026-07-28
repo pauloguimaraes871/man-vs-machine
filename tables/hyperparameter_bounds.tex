@@ -1,0 +1,38 @@
+\begin{table}[h]
+\captionsetup{
+  justification=raggedright,
+  labelsep=none,
+  singlelinecheck=false,
+  labelformat=boldlabel,
+}
+\renewcommand{\arraystretch}{1.25}
+\caption[Bayesian-optimization search space]{\footnotesize \textbf{: Bayesian-optimization search space.} Each entry is the closed interval searched for that hyperparameter; "--" means the hyperparameter does not apply to that model. Bounds are read directly from the tuning configuration stored with each fitted base learner, so they describe the search that was actually run. Hyperparameters are re-optimized at every walk-forward refit, so the table reports the domain rather than a selected value; Figure~\ref{fig:hyper_time} shows the chosen values over time. OLS is unregularized and has no tuned hyperparameters. NN1--NN3 share one search space and differ only in depth. Symbols follow the notation of Section~\ref{sec:methods}; the mixing weight $\lambda^{\rho}$ of Equation~\ref{elasticeq} is the ridge share, which is one minus \texttt{glmnet}'s \texttt{alpha} and therefore searched over the same interval. The penalty path floor is \texttt{lambda.min.ratio}, the ratio of the smallest to the largest $\lambda^{\psi}$ on the fitted path, not $\lambda^{\psi}$ itself. Integer-valued hyperparameters are searched on the integers within the stated interval. The final rows give the search budget: the size of the initial space-filling design and the number of subsequent acquisition steps, per refit.}
+\scriptsize
+\setlength{\tabcolsep}{4pt}
+\begin{tabularx}{\linewidth}{>{\raggedright\arraybackslash}m{5.0cm}>{\hsize=0.920\hsize\raggedleft\arraybackslash}X>{\hsize=0.920\hsize\raggedleft\arraybackslash}X>{\hsize=0.920\hsize\raggedleft\arraybackslash}X>{\hsize=1.241\hsize\raggedleft\arraybackslash}X}
+\hline
+Hyperparameter & ENET & RF & XGB & NN1--NN3 \\
+\hline
+Penalty path floor $\lambda^{\psi}$ & [$10^{-4}$, 0.5] & -- & -- & -- \\
+L1/L2 mixing $\lambda^{\rho}$ & [0, 1] & -- & -- & -- \\
+Trees / boosting rounds $\lambda^{T}$, $\lambda^{F}$ & -- & [200, 800] & [100, 400] & -- \\
+Maximum depth $\lambda^{D}$ & -- & [2, 10] & [2, 5] & -- \\
+Minimum terminal node size $\lambda^{L}$ & -- & [1, 10] & [1, 4] & -- \\
+Feature subsampling fraction $\lambda^{R}$ & -- & [0.1, 1] & [0.6, 1] & -- \\
+Row subsampling fraction $\lambda^{S}$ & -- & -- & [0.75, 1] & -- \\
+Learning rate & -- & -- & [0.02, 0.07] & [$10^{-4}$, 0.01] \\
+L1 penalty & -- & -- & [0, 1] & [$10^{-5}$, 0.01] \\
+L2 penalty & -- & -- & -- & [$10^{-5}$, $10^{-3}$] \\
+Minimum split loss & -- & -- & [0, 1.5] & -- \\
+Dropout rate & -- & -- & -- & [0.25, 0.75] \\
+Batch size $\lambda^{b}$ & -- & -- & -- & [128, 512] \\
+Epochs $\lambda^{e}$ & -- & -- & -- & [60, 110] \\
+\hline
+Initial design points & 8 & 16 & 32 & 24 \\
+Acquisition iterations & 4 & 8 & 16 & 12 \\
+\hline
+\multicolumn{5}{@{}p{0.98\linewidth}@{}}{\textit{Acquisition function: EI. Objective: validation RMSE over a 36-month validation window.}} \\
+\hline
+\end{tabularx}
+\label{hyperchoice}
+\end{table}

@@ -960,42 +960,7 @@ Yearly Inflation Surprise & $ipca\_yearly\_sur\_5y$ & Duarte (2013) & Macro \\
 
   \label{sec:hyperef} 
       \vspace{1em} % Add some vertical space if needed
-\begin{table}[h]
-
-\captionsetup{
-  justification=raggedright, % Left-align the caption
-  labelsep=none,
-  singlelinecheck=false, % Allow multi-line captions
-  labelformat=boldlabel, % Use the custom label format
-}
-
-\renewcommand{\arraystretch}{1.25}
-\caption[Table 4: \footnotesize ]{\footnotesize \\ \textbf{Candidate values for hyperparameters}. This table describes candidate values for grid-search.}  
-\footnotesize % Reduce font size further
-\begin{tabularx}{\linewidth}{>{\raggedright\arraybackslash}m{1cm}>{\raggedright\arraybackslash}m{2cm}>{\raggedright\arraybackslash}m{3cm}>{\raggedright\arraybackslash}m{3cm}>{\raggedright\arraybackslash}m{4cm}}
-\hline
-\multirow{2}{*}{$\lambda^{v}$} & \multirow{2}{*}{ENET} & \multirow{2}{*}{RF} & \multirow{2}{*}{XGBoost} & \multirow{2}{*}{ANN1-ANN3} \\
-& & & & \\
-\hline
-$\lambda^{\psi}$ & $10^{-[4,2]}$ & - & - & - \\
-$\lambda^{\rho}$ & 0.5 & - & - & - \\
-$\lambda^{D}$ & -  & (2, 4, 8, 10) & (2, 4, 8, 10) & - \\
-$\lambda^{T}$\/$\lambda^{F}$  & -  & 500 & 500 & - \\
-$\lambda^{R}$ & -  & (0.01, 0.1, \ldots, 1.0) & (0.50, 0.75) & (0.25, 0.50, 0.75) \\
-$\lambda^{B}$\/$\lambda^{S}$ & -  & 1 & 1 & - \\
-$\lambda^{\gamma}$ & - & - & (0, 2, 5) & - \\
-$\lambda^{\Lambda}$ & - & - & (2, 5) & - \\
-$\lambda^{\eta}$ & - & - & (0.001, 0.005, \ldots, 0.02) & $10^{-(2,3,4,5)}$ \\
-$\lambda^{\phi}$ & - & - & 50 & 5 \\
-$\lambda^{\omega}$ & - & - & - & $10^{-(2,3,4,5)}$ \\
-$\lambda^{\delta}$ & - & - & - & 0 \\
-$\lambda^{b}$ & - & - & - & 512 \\
-$\lambda^{e}$ & - & - & - & 100 \\
-$\lambda^{\iota}$ & - & - & - & 10 \\
-\hline
-\end{tabularx}
-\label{hyperchoice}
-\end{table}      
+\input{../tables/hyperparameter_bounds.tex}      
 
 
 

@@ -2783,6 +2783,221 @@ spanning_table_tex <- c(
 )
 writeLines(spanning_table_tex, here::here("tables", "spanning_tests.tex"))
 
+# ---- Appendix: Bayesian-optimization search space ---------------------------
+# The bounds are READ from the tuning strategies stored with each base learner
+# rather than transcribed by hand, so this table cannot drift from the
+# configuration that was actually run. Every (model, hyperparameter) pair must
+# map to a display row: an unmapped pair aborts instead of being dropped
+# silently, which is what allows the table to stay honest as the config evolves.
+bo_strategies <- purrr::imap(sb_list, function(sbr, nm) {
+  ts <- tryCatch(sbr@sb_backtest_config@tuning_strategy, error = function(e) NULL)
+  if (is.null(ts) || !methods::is(ts, "bayesian_opt_strategy")) return(NULL)
+  ts
+})
+names(bo_strategies) <- fi_model_label(names(bo_strategies))
+bo_strategies <- purrr::compact(bo_strategies)
+bo_model_order <- intersect(fi_model_order, names(bo_strategies))
+bo_strategies <- bo_strategies[bo_model_order]
+if (length(bo_strategies) == 0L) {
+  rlang::abort("No Bayesian-optimization strategy was found in the base-learner configs.")
+}
+
+bo_bounds <- purrr::imap_dfr(bo_strategies, function(ts, label) {
+  hl <- ts@hyper_grid_domain@hyperparameter_list
+  purrr::imap_dfr(hl, function(v, hyper) {
+    if (!is.numeric(v) || length(v) != 2L || anyNA(v)) {
+      rlang::abort(paste0("Unexpected search domain for ", label, "::", hyper, "."))
+    }
+    tibble::tibble(model = label, hyper = hyper, lo = min(v), hi = max(v))
+  })
+})
+
+# NN1-NN3 differ only in depth, so they share one search space and one column.
+# Verify rather than assume: if they ever diverge, the table must split them.
+bo_nn <- intersect(c("NN1", "NN2", "NN3"), bo_bounds$model)
+if (length(bo_nn) > 1L) {
+  bo_nn_sets <- lapply(bo_nn, function(m) {
+    bo_bounds %>% dplyr::filter(model == m) %>%
+      dplyr::arrange(hyper) %>% dplyr::select(hyper, lo, hi)
+  })
+  if (!all(vapply(bo_nn_sets[-1], function(d) isTRUE(all.equal(d, bo_nn_sets[[1]])),
+                  logical(1)))) {
+    rlang::abort("NN1-NN3 no longer share one search space; split the appendix columns.")
+  }
+  bo_bounds <- bo_bounds %>%
+    dplyr::filter(!model %in% bo_nn[-1]) %>%
+    dplyr::mutate(model = dplyr::if_else(model == bo_nn[[1]], "NN", model))
+}
+
+# Keyed on model AND hyperparameter: `alpha` is the L1/L2 mixing weight in
+# glmnet but the L1 penalty in XGBoost, so the name alone is ambiguous.
+bo_concept <- c(
+  "GLMNET::lambda.min.ratio" = "Penalty path floor $\\lambda^{\\psi}$",
+  "GLMNET::alpha"            = "L1/L2 mixing $\\lambda^{\\rho}$",
+  "RF::num.trees"            = "Trees / boosting rounds $\\lambda^{T}$, $\\lambda^{F}$",
+  "XGB::nrounds"             = "Trees / boosting rounds $\\lambda^{T}$, $\\lambda^{F}$",
+  "RF::max.depth"            = "Maximum depth $\\lambda^{D}$",
+  "XGB::max_depth"           = "Maximum depth $\\lambda^{D}$",
+  "RF::min.bucket"           = "Minimum terminal node size $\\lambda^{L}$",
+  "XGB::min_child_weight"    = "Minimum terminal node size $\\lambda^{L}$",
+  "RF::mtry"                 = "Feature subsampling fraction $\\lambda^{R}$",
+  "XGB::colsample_bytree"    = "Feature subsampling fraction $\\lambda^{R}$",
+  "XGB::subsample"           = "Row subsampling fraction $\\lambda^{S}$",
+  "XGB::eta"                 = "Learning rate",
+  "NN::lr"                   = "Learning rate",
+  "XGB::alpha"               = "L1 penalty",
+  "NN::regularizer_l1"       = "L1 penalty",
+  "NN::regularizer_l2"       = "L2 penalty",
+  "XGB::gamma"               = "Minimum split loss",
+  "NN::droprate"             = "Dropout rate",
+  "NN::size_of_batch"        = "Batch size $\\lambda^{b}$",
+  "NN::number_of_epochs"     = "Epochs $\\lambda^{e}$"
+)
+bo_row_order <- c(
+  "Penalty path floor $\\lambda^{\\psi}$",
+  "L1/L2 mixing $\\lambda^{\\rho}$",
+  "Trees / boosting rounds $\\lambda^{T}$, $\\lambda^{F}$",
+  "Maximum depth $\\lambda^{D}$",
+  "Minimum terminal node size $\\lambda^{L}$",
+  "Feature subsampling fraction $\\lambda^{R}$",
+  "Row subsampling fraction $\\lambda^{S}$",
+  "Learning rate",
+  "L1 penalty",
+  "L2 penalty",
+  "Minimum split loss",
+  "Dropout rate",
+  "Batch size $\\lambda^{b}$",
+  "Epochs $\\lambda^{e}$"
+)
+
+bo_bounds$key <- paste(bo_bounds$model, bo_bounds$hyper, sep = "::")
+bo_unmapped <- setdiff(bo_bounds$key, names(bo_concept))
+if (length(bo_unmapped) > 0L) {
+  rlang::abort(paste0(
+    "Unmapped hyperparameter(s) in the appendix search-space table: ",
+    paste(bo_unmapped, collapse = ", "), "."
+  ))
+}
+bo_bounds$concept <- unname(bo_concept[bo_bounds$key])
+stopifnot(all(bo_bounds$concept %in% bo_row_order))
+
+# Exact powers of ten below 0.01 render as 10^k; everything else keeps its
+# literal value, so a column of fractions reads 0.1 / 0.6 / 0.75 rather than
+# mixing $10^{-1}$ into a list of decimals.
+fmt_bo <- function(x) {
+  if (!is.finite(x)) return("--")
+  if (x == 0) return("0")
+  if (x == round(x) && abs(x) >= 1) return(format(x, scientific = FALSE, trim = TRUE))
+  e <- log10(abs(x))
+  if (abs(x) < 0.01 && abs(e - round(e)) < 1e-9) {
+    return(sprintf("$10^{%d}$", as.integer(round(e))))
+  }
+  sub("[.]$", "", sub("0+$", "", sprintf("%.5f", x)))
+}
+
+bo_cols <- intersect(c("GLMNET", "RF", "XGB", "NN"), unique(bo_bounds$model))
+bo_col_label <- c(GLMNET = "ENET", RF = "RF", XGB = "XGB", NN = "NN1--NN3")
+
+# NN1--NN3's cells hold longer bracketed intervals (e.g. "[1e-05, 0.01]"), so an
+# equal-width X column wraps there first. Give it extra share of the X-column
+# width via tabularx's \hsize ratio trick, renormalized so the ratios still sum
+# to the column count -- otherwise the columns would over- or under-fill
+# \linewidth.
+bo_col_weight <- setNames(rep(1, length(bo_cols)), bo_cols)
+if ("NN" %in% names(bo_col_weight)) bo_col_weight[["NN"]] <- 1.35
+bo_col_weight <- bo_col_weight / sum(bo_col_weight) * length(bo_col_weight)
+bo_colspec <- paste(
+  sprintf(">{\\hsize=%.3f\\hsize\\raggedleft\\arraybackslash}X", bo_col_weight[bo_cols]),
+  collapse = ""
+)
+
+bo_cell <- function(concept, model) {
+  r <- bo_bounds[bo_bounds$concept == concept & bo_bounds$model == model, , drop = FALSE]
+  if (nrow(r) == 0L) return("--")
+  if (nrow(r) > 1L) {
+    rlang::abort(paste0("Two hyperparameters map to '", concept, "' for ", model, "."))
+  }
+  sprintf("[%s, %s]", fmt_bo(r$lo[[1]]), fmt_bo(r$hi[[1]]))
+}
+
+bo_table_rows <- vapply(intersect(bo_row_order, bo_bounds$concept), function(concept) {
+  paste0(concept, " & ",
+         paste(vapply(bo_cols, function(m) bo_cell(concept, m), character(1)),
+               collapse = " & "),
+         " \\\\")
+}, character(1), USE.NAMES = FALSE)
+
+bo_budget_row <- function(label, field) {
+  paste0(label, " & ",
+         paste(vapply(bo_cols, function(m) {
+           src <- if (m == "NN") bo_nn[[1]] else m
+           format(methods::slot(bo_strategies[[src]], field), trim = TRUE)
+         }, character(1)), collapse = " & "),
+         " \\\\")
+}
+
+bo_ref <- bo_strategies[[bo_cols[[1]]]]
+bounds_table_tex <- c(
+  "\\begin{table}[h]",
+  "\\captionsetup{",
+  "  justification=raggedright,",
+  "  labelsep=none,",
+  "  singlelinecheck=false,",
+  "  labelformat=boldlabel,",
+  "}",
+  "\\renewcommand{\\arraystretch}{1.25}",
+  paste0(
+    "\\caption[Bayesian-optimization search space]",
+    "{\\footnotesize \\textbf{: Bayesian-optimization search space.} Each entry is ",
+    "the closed interval searched for that hyperparameter; \"--\" means the ",
+    "hyperparameter does not apply to that model. Bounds are read directly from ",
+    "the tuning configuration stored with each fitted base learner, so they ",
+    "describe the search that was actually run. Hyperparameters are re-optimized ",
+    "at every walk-forward refit, so the table reports the domain rather than a ",
+    "selected value; Figure~\\ref{fig:hyper_time} shows the chosen values over ",
+    "time. OLS is unregularized and has no tuned hyperparameters. NN1--NN3 share ",
+    "one search space and differ only in depth. Symbols follow the notation of ",
+    "Section~\\ref{sec:methods}; the mixing weight $\\lambda^{\\rho}$ of ",
+    "Equation~\\ref{elasticeq} is the ridge share, which is one minus ",
+    "\\texttt{glmnet}'s \\texttt{alpha} and therefore searched over the same ",
+    "interval. The penalty path floor is \\texttt{lambda.min.ratio}, the ratio of ",
+    "the smallest to the largest $\\lambda^{\\psi}$ on the fitted path, not ",
+    "$\\lambda^{\\psi}$ itself. Integer-valued hyperparameters are searched on the ",
+    "integers within the stated interval. The final rows give the search budget: ",
+    "the size of the initial space-filling design and the number of subsequent ",
+    "acquisition steps, per refit.}"
+  ),
+  # \scriptsize, matching every other generated table's body font: at
+  # \footnotesize the bracketed intervals wrap mid-cell in the narrower columns.
+  "\\scriptsize",
+  "\\setlength{\\tabcolsep}{4pt}",
+  paste0(
+    "\\begin{tabularx}{\\linewidth}{>{\\raggedright\\arraybackslash}m{5.0cm}",
+    bo_colspec, "}"
+  ),
+  "\\hline",
+  paste0("Hyperparameter & ",
+         paste(unname(bo_col_label[bo_cols]), collapse = " & "), " \\\\"),
+  "\\hline",
+  bo_table_rows,
+  "\\hline",
+  bo_budget_row("Initial design points", "init_points"),
+  bo_budget_row("Acquisition iterations", "n_iter"),
+  "\\hline",
+  sprintf(
+    paste0("\\multicolumn{%d}{@{}p{0.98\\linewidth}@{}}{\\textit{Acquisition ",
+           "function: %s. Objective: validation %s over a %d-month validation ",
+           "window.}} \\\\"),
+    length(bo_cols) + 1L, toupper(bo_ref@acq), toupper(bo_ref@chosen_eval_metric),
+    bo_ref@validation_sample_size
+  ),
+  "\\hline",
+  "\\end{tabularx}",
+  "\\label{hyperchoice}",
+  "\\end{table}"
+)
+writeLines(bounds_table_tex, here::here("tables", "hyperparameter_bounds.tex"))
+
 # Keep the manuscript's figure assets synchronized with the generated outputs.
 generated_figure_files <- c(
   "feature_importance_bar.png",
