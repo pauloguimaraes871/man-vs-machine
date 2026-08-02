@@ -1,10 +1,16 @@
-# HANDOFF: Independent review of the plots, tables, and manuscript objects
+# HANDOFF: Status after Claude's review of Codex's 15th-to-15th rewrite
 
 ## Purpose and evidence labels
 
-This handoff is for Claude to review the current uncommitted implementation in
-`plots.R`, the generated tables and figures, and their integration into
-`latex_paper/manuscript.tex`.
+This handoff originally asked Claude to independently review Codex's rewrite
+of the return pipeline, the new fund-picker and spanning analyses, and their
+integration into `latex_paper/manuscript.tex`. That review is now complete:
+every item Codex flagged has been independently verified, and every
+correctness or presentation issue found along the way has been fixed and
+committed. This document now records what was checked, what changed, and what
+is left for the repository owner to decide. It is not yet retired to
+`DESIGN_DECISIONS.md` because the prose in Section 5 still needs a rewrite
+against the corrected numbers (see "What is still open" below).
 
 Claims use the following labels:
 
@@ -13,428 +19,268 @@ Claims use the following labels:
 - **[INFERENCE]** An economic or statistical interpretation of those facts.
 - **[JUDGMENT]** A defensible design choice, but not a fact established by the
   output.
-- **[OPEN REVIEW ITEM]** A specific issue Claude should validate or resolve.
+- **[RESOLVED]** An item the earlier handoff flagged for review; the review
+  is complete and the resolution is stated.
+- **[OPEN]** Still unresolved; requires further work or an owner decision.
 
-The manuscript prose is known to be stale. The current review priority is the
-return pipeline, plots, generated tables, and the new analyses.
+## Git state
 
-## Git state and approved scope
+- **[FACT]** Current branch: `main`. Working tree clean except for a byte-level
+  diff in `latex_paper/manuscript.pdf` (see "Loose end" below) and the
+  pre-existing untracked `provenance/` directory, which predates this review
+  and was not created or touched by it.
+- **[FACT]** Three commits landed on `main` during this review, in order:
+  1. `7ed54ef fix: correct fund-picker threshold, spanning interpretation, and frontier consistency`
+  2. `ee987ff docs: correct ranking caption, delta-IR interval label, and float numbering`
+  3. `17f8b79 fix: replace stale grid-search hyperparameter table with Bayesian-opt bounds`
+- **[FACT]** All three are on `main` directly, per the repository owner's
+  standing instruction for this project.
 
-- **[FACT]** Current branch: `main`.
-- **[FACT]** Current HEAD: `4bef2e6 Initialize project with 15th-to-15th return analysis`.
-- **[FACT]** The repository owner explicitly requested that this work remain on
-  `main`, overriding the repository's usual default-branch restriction.
-- **[FACT]** All work described here is uncommitted. Review the working-tree diff
-  against `HEAD`; do not assume a commit boundary exists.
-- **[FACT]** The working tree already contained the earlier Claude implementation.
-  Codex edited it in place and did not revert unrelated work.
+## What Codex changed (context for the numbers below)
 
-Primary edited source files:
-
-- `plots.R`
-- `latex_paper/manuscript.tex`
-- `HANDOFF.md`
-
-Generated or regenerated objects include:
-
-- `tables/active_performance.tex`
-- `tables/model_performance.tex`
-- `tables/factor_attribution.tex`
-- `tables/combination_frontier.tex`
-- `tables/fund_picker_robustness.tex` (new)
-- `tables/spanning_tests.tex` (new)
-- existing PNGs under `figures/` and `latex_paper/figures/`
-- `figures/fund_picker_quantile_sensitivity.png` (new)
-- `figures/fund_picker_basket_size.png` (new)
-- `figures/fund_picker_precision.png` (new)
-- `figures/fund_picker_robustness_figures.tex` (new)
-- `latex_paper/manuscript.pdf`
-
-## Superseded statements from the old handoff
-
-The previous `HANDOFF.md` described an older implementation. The following are
-no longer true:
-
-- **[FACT]** Fund returns are no longer calendar-month returns from
-  `bases_fundos.xlsx`. They are compounded from daily returns to the ML
-  backtest's calendar-15th endpoints.
+- **[FACT]** Fund returns are compounded from daily returns
+  (`bases_fundos_diarios.xlsx`, `ibov_diarios.xlsx`, `CDI_diarios.xlsx`) to the
+  ML backtest's own calendar-15th endpoints, replacing the earlier calendar-month
+  convention.
 - **[FACT]** The Dimson lead/lag market adjustment was removed. Fund, ML, IBOV,
-  CDI, and factor returns now share the same 15th-to-15th convention.
-- **[FACT]** `restore_meta_xts_dates()` is now defined near the start of
-  `plots.R`; it is not an external interactive-session helper.
-- **[FACT]** The full pipeline completed from `Rscript --vanilla` in the current
-  environment, so the formerly described interactive-session setup is stale.
-- **[FACT]** Generated figure PNGs are copied into `latex_paper/figures/` by the
-  final section of `plots.R`; manual copying is no longer required.
-- **[FACT]** CDI covers every evaluated endpoint in the current daily file; the
-  code now aborts if either CDI or IBOV is missing for an evaluation period.
+  CDI, and factor returns now share one 15th-to-15th timing convention, which
+  made the correction unnecessary rather than wrong.
+- **[FACT]** Two new analyses were added: fund-picking robustness (Table 6,
+  Figures 13-15) and two-direction mean-variance spanning (Table 7).
+- **[FACT]** `latex_paper/manuscript.tex` now uses `\input{...}` for every
+  generated table and figure rather than embedding large generated blocks.
 
-## Return ingestion and timing
+## Independently verified and closed without code changes
 
-### Current implementation
+These were open review items in the prior handoff. Verification was done by
+re-deriving each number from the raw daily files or by reimplementing the
+statistic independently, not by re-reading the code that produced it.
 
-- **[FACT]** Inputs are:
-  - `data/bases_fundos_diarios.xlsx`
-  - `data/ibov_diarios.xlsx`
-  - `data/CDI_diarios.xlsx`
-- **[FACT]** Each workbook currently has one sheet named `459666`.
-- **[FACT]** Current workbook inspection found metadata in rows 1-3, headers in
-  row 4, Excel serial dates in the first column, percentage returns thereafter,
-  and `"-"` for missing values.
-- **[FACT]** The current IBOV and CDI headers identify the source as
-  `Economatica`, despite the earlier warning that CDI came from a different
-  provider. Sample CDI daily values are approximately `0.0525`, which the parser
-  treats as percent per day.
-- **[FACT]** `read_economatica_daily_returns()` skips three rows, requires at
-  least one return column, converts `"-"` to `NA`, checks unique sorted dates,
-  extracts the last newline-delimited header component as the series ID, and
-  rejects nonnumeric values and returns below -100 percent.
-- **[FACT]** `compound_daily_returns_15th()` requires consecutive endpoints that
-  all fall on the calendar 15th. For endpoint `t`, it geometrically compounds
-  simple daily percentage returns over `(t-1, t]`:
-  `prod(1 + r_d / 100) - 1`.
-- **[FACT]** The monthly endpoint vector comes directly from the ML benchmark
-  index.
-- **[FACT]** Daily-compounded IBOV is reconciled against the stored ML benchmark
-  and the script aborts if the maximum difference exceeds 1 basis point.
-- **[FACT]** IBOV and CDI must have a finite compounded return for every
-  evaluation period.
-- **[FACT]** Funds require at least 36 nonmissing compounded monthly returns to
-  enter the common eligible universe.
-- **[FACT]** Current generated outputs imply 1,128 eligible funds and 282
-  top-quartile funds.
+- **[RESOLVED]** CDI provenance and units. Single column `CDI Acumulado`,
+  2,219 daily observations, zero negative days, mean ~0.033%/day (~8.8% p.a.),
+  consistent with a Brazilian money-market daily rate correctly parsed as
+  percent. No further action needed.
+- **[RESOLVED]** Partial-month fund-return handling. Across all 82,617
+  observed fund-months, median daily coverage is 95.7% of trading days; only
+  0.5% of fund-months fall below 50% coverage and 0.13% have 3 or fewer days.
+  Low-coverage months are not concentrated in the top quartile (0.54% vs 0.72%
+  fundwide). A minimum-coverage rule would exclude a negligible, non-biasing
+  slice of the data; none was added.
+- **[RESOLVED]** IBOV reconciliation. Daily-compounded IBOV matches the ML
+  backtest's stored benchmark to within 0.1 basis point (max abs diff
+  0.001 percentage points across 102 periods). The 15th-to-15th rewrite is
+  correct, not merely internally consistent.
+- **[RESOLVED]** Spanning Wald statistics. Independently reimplemented via
+  per-equation OLS plus the SUR covariance kronecker(Sigma, (X'X)^-1); matches
+  the code's `spanning_wald_stat()` exactly (71.6910/df 4 and 28.9039/df 6).
+- **[RESOLVED]** The reported `Delta SR = 0.000` for "ML spans human" is a
+  genuine corner solution (both optimizations place 100% weight on
+  `FUNDS_Q75`), not a masked optimizer failure. A 200,000-draw random-simplex
+  search over the same asset set found nothing better than the SLSQP result.
+- **[FACT, corrected]** The prior handoff stated 1,128 eligible funds. The
+  actual count under the 36-observation screen is **1,127**; the 282
+  top-quartile count (25% of 1,127, rounded up) was already correct and is
+  unaffected.
 
-### Edge cases for review
+## Fixes applied and committed
 
-- **[FACT]** Within a monthly period, missing daily fund observations are simply
-  removed before compounding. One finite daily return is enough to produce a
-  monthly return; there is no minimum-day or endpoint-coverage requirement.
-- **[INFERENCE]** Launch, closure, suspension, or partial-reporting months may
-  therefore be treated as valid partial-period returns. Claude should determine
-  whether the Economatica export semantics make this harmless or whether those
-  boundary months should be excluded.
-- **[FACT]** The parser validates structure and numeric plausibility but does not
-  prove that a column contains returns rather than levels, nor whether units are
-  percent rather than decimal.
-- **[OPEN REVIEW ITEM]** Independently verify CDI provenance, units, and whether
-  the first worksheet is the intended series. Passing structural checks is not
-  semantic validation.
-- **[FACT]** If IBOV or CDI contains multiple return columns, only the first is
-  used. No explicit single-series assertion is made.
-- **[FACT]** Returns equal to -100 percent and arbitrarily large positive returns
-  pass the current range check.
-- **[FACT]** `rowMeans(..., na.rm = TRUE)` can produce `NaN` if every selected
-  fund is missing in a month. The later fund-picker helper converts nonfinite
-  values to `NA`, but the initial `FUNDS_MEAN` and `FUNDS_Q75` construction does
-  not explicitly normalize or abort on an all-missing month.
+### `7ed54ef` — four correctness/interpretation fixes
 
-## Fees, costs, and units
+1. **Fund-picker Panel C threshold.** The caption defined "Min. likely" as
+   `P(Delta IR > 0) >= 75%`; the code used `>= 0.5`. Worse, because
+   `Delta IR >= 0` by construction (the weight grid contains both endpoints),
+   `median(Delta) > 0` and `P(Delta > 0) >= 0.5` are the same test, so the two
+   table columns were reporting one number twice ("100% / 100%" in every row).
+   Fixed the code to `>= 0.75`, so the two columns now diverge. New Table 6
+   values: baskets of 4 and 8 no longer clear the bar ("--"); baskets of 20 and
+   40 do.
+   - **[OPEN, minor]** Basket size 20 clears the new bar at P = 0.754 against a
+     0.750 threshold, which is inside Monte Carlo noise at 500 draws/cell
+     (SE approx 0.019). The qualitative conclusion (small baskets fail even at
+     perfect precision) is solid; that one cell's classification could flip
+     under a different seed. Raising `precision_draws_per_cell` (currently 500)
+     to ~5,000 would settle it cheaply if the exact cutoff matters.
+2. **Spanning-test interpretation.** Added per-test-asset intercepts and their
+   t-statistics beneath Table 7, computed from the same OLS fit
+   (`resid_vcov <- crossprod(residuals) / (n - k)`, intercept SE from
+   `sqrt(diag(resid_vcov) * xtx_inv[1,1])`); cross-checked against `lm()` and
+   matches exactly. This surfaced that "ML spans human" is driven by
+   `FUNDS_MEAN`'s significantly *negative* intercept (alpha = -0.31%/month,
+   t = -2.46), not by human managers adding value; and that in "Human spans
+   ML" no individual ML portfolio has a significant intercept (t in
+   [-0.30, 1.02]), so that rejection is driven by the `B*1 = 1` scaling
+   restriction rather than abnormal return. Caption reframed to lead with
+   Delta SR / Delta IR as the economically relevant, long-only-consistent
+   quantities.
+3. **IR-convention reconciliation.** Table 3 (`\ref{actret}`) reports IR as
+   geometric annualized active return / TE; the combination (Table 5) and
+   fund-picker (Table 6) tables use the arithmetic-mean convention. Both are
+   defensible, but the same portfolio can carry two different IRs across
+   tables (e.g. RP: 0.58 in Table 3, 0.49 in Table 6). Added a caption sentence
+   to each of the three tables stating its convention and cross-referencing
+   the others; no numbers changed.
+4. **Frontier figure/table consistency.** `combo_metrics()` reported `ir` as
+   the median across funds of each fund's own IR, but plotted
+   `(active_risk, active_ret)` as separate medians of the components. For the
+   two `FUNDS_MEAN`/`FUNDS_Q75` panels (one manager series) these coincide; for
+   the two `MED_FUND`/`MED_FUND_Q75` panels (282 funds) they diverge by up to
+   0.04 IR, so the plotted maximum-IR diamond did not always sit on the drawn
+   curve. Added `ir_plot = median(active_ret) / median(active_risk)` and moved
+   the diamond to `slice_max(ir_plot)`; `ir` (used in Table 5) is untouched.
+   Also stopped collapsing the `w=0` "pure manager" point across ML schemes:
+   because a fund's non-reporting months are reallocated to that scheme's own
+   ML return, the `w=0` point genuinely differs by scheme (6 distinct values
+   across 8 schemes in the `MED_FUND_Q75` panel). The point now carries the
+   scheme colour instead of being forced black, and the caption explains the
+   multiplicity.
 
-- **[FACT]** ML return objects are already the backtest's `net_returns` objects,
-  which are treated as net of transaction costs.
-- **[FACT]** A 1 percent annual management fee is converted geometrically to a
-  monthly fee:
-  `(1 + 0.01)^(1/12) - 1`.
-- **[FACT]** The monthly ML portfolio return is adjusted as
-  `(1 + r/100)/(1 + monthly_fee) - 1`.
-- **[FACT]** The fee is not deducted from the IBOV benchmark.
-- **[FACT]** Both ensemble-scheme returns and model-level returns used in
-  return-based plots/tables receive the fee deduction.
-- **[FACT]** `ml_ports_net_m_xts` is the downstream ensemble return input for
-  performance, cumulative returns, correlations, combinations, fund-picker
-  exercises, and spanning.
-- **[JUDGMENT]** A constant monthly equivalent of a 1 percent annual fee is a
-  transparent convention for monthly 15th-to-15th periods.
-- **[INFERENCE]** Human fund returns are being treated as investor net returns.
-  That is economically plausible for reported quota returns, but the workbook
-  metadata inspected here does not independently establish the treatment of all
-  fund-level fees.
-- **[OPEN REVIEW ITEM]** Confirm that the stored ML `net_returns` series already
-  deduct transaction costs exactly once. The current script assumes this rather
-  than recomputing transaction costs.
+### `ee987ff` — three presentation fixes
 
-## Human-manager estimands and aggregation
+5. **Ranking-statistic caption.** Figure 13 claimed funds were ranked by
+   "full-window geometric return"; `rank_funds()` actually uses the arithmetic
+   mean of monthly returns. Rather than just correcting the wording, added two
+   diagnostics computed in `plots.R` and injected into the caption: 94% of
+   top-quartile membership is unchanged under a geometric ranking, and 50% of
+   top-quartile funds (142 of 282) are ranked on a shorter history than the
+   full window because the 36-observation eligibility screen admits partial
+   histories. Table 3's caption gained a pointer to this, since `FUNDS_Q75` is
+   first defined there.
+   - **[OPEN]** The underlying issue (unequal history lengths competing on the
+     same arithmetic-mean rank, with the top quartile also running higher
+     volatility: mean vol 7.36 vs 6.96 fundwide) is now disclosed but not
+     corrected. A length-adjusted or geometric ranking is a defensible
+     alternative; changing it would move `FUNDS_Q75` throughout the paper and
+     is an owner decision, not something to change unilaterally.
+6. **Delta-IR interval label.** Panel A's column was headed "95% CI", which
+   invites a significance reading the statistic cannot support (`Delta IR`
+   is non-negative by construction and further inflated by maximizing over the
+   weight grid, so a lower bound of 0.00 tests no null). Renamed to "95% band"
+   and the caption now states this explicitly.
+7. **Hard-coded float numbers.** Every generated caption
+   (`\caption[Table 3: ...]`, `\caption[Figure 7: ...]`, etc.) carried a
+   hand-maintained number in its optional argument, separate from LaTeX's own
+   auto-numbering. Four of six table numbers were already stale (a float had
+   been inserted ahead of them) and two different tables both claimed
+   "Table 6". This was invisible only because the manuscript has no list of
+   tables/figures to typeset the optional argument; adding one would have
+   surfaced six wrong numbers at once. Removed the numbers; the short caption
+   is now the optional argument. `latex_figure()` lost its `fig_num`
+   parameter; all 15 call sites updated. LaTeX-assigned numbers are unchanged
+   (tables 2-7, figures 1-15).
+   - Found and fixed two related bugs while verifying this: Figure 13's panels
+     rendered alphabetically instead of RP-first, because the ribbon layer
+     supplied `scheme` as a character while the main layer supplied a factor
+     (`facet_wrap()` falls back to alphabetical when a facet variable
+     disagrees in type across layers); and Figure 15's cell labels were at two
+     decimals while the underlying values span 0-0.012, collapsing every
+     100%-precision cell to "0.01" regardless of basket size. Both fixed;
+     Figure 15 now shows its actual gradient (0.005/0.008/0.011/0.012 across
+     basket sizes 4/8/20/40).
 
-- **[FACT]** Daily returns are geometrically compounded into monthly returns.
-- **[FACT]** Funds are then ranked by the arithmetic mean of those monthly
-  percentage returns over the evaluation window (`colMeans`).
-- **[OPEN REVIEW ITEM]** Some figure language says "full-window geometric
-  return." If the intended ranking statistic is full-window compounded or
-  annualized geometric return, the implementation does not currently do that.
-  If "geometric" only describes daily-to-monthly aggregation, clarify the
-  caption.
-- **[FACT]** The main Q75 threshold uses `quantile(score, 0.75)` and includes
-  scores greater than or equal to the threshold. Ties can make the retained
-  fraction differ slightly from exactly 25 percent.
-- **[FACT]** Oracle sensitivity uses a sorted list and retains
-  `ceiling(top_share * N)`, so its tie behavior differs from the main quantile
-  threshold.
-- **[FACT]** `FUNDS_MEAN` is the monthly mean return among available eligible
-  funds.
-- **[FACT]** `FUNDS_Q75` is the monthly mean return among available ex-post
-  top-quartile funds.
-- **[FACT]** These are "metric of an aggregated return series" estimands and
-  benefit from cross-fund diversification.
-- **[FACT]** `MED` and `MED_Q75` calculate each metric per fund and then report
-  the cross-fund median. They are not tradable aggregate portfolios.
-- **[FACT]** Median aggregation is also used for individual-fund combination
-  results.
-- **[JUDGMENT]** Median is preferable to mean for cross-fund nonlinear ratios
-  because near-zero denominators can dominate the mean.
-- **[FACT]** Fixed "equal-weight" baskets dynamically renormalize over reporting
-  funds through `rowMeans(..., na.rm = TRUE)`. They are fixed membership
-  baskets, not fixed weights on unavailable constituents.
-- **[INFERENCE]** This is defensible as an available-fund portfolio, but captions
-  should not imply that unavailable fund weights remain in cash.
+### `17f8b79` — stale hyperparameter table replaced
 
-## Combination frontier
+8. **Table 13 (`\label{hyperchoice}`), "Candidate values for hyperparameters",
+   still described grid-search values from before the pipeline switched to
+   Bayesian optimization** (e.g. RF trees fixed at 500; XGB depth in
+   `{2,4,8,10}`), and 9 of its 17 symbols were never defined anywhere in the
+   prose. Replaced with a table **generated from
+   `tuning_strategy@hyper_grid_domain`**, read directly off each fitted base
+   learner's stored config, so the bounds cannot drift from what was actually
+   run. Reports min/max per hyperparameter, the search budget (initial design
+   points, acquisition iterations), the acquisition function (EI), and the
+   objective (36-month validation RMSE).
+   - Two guards make future drift loud instead of silent: an unmapped
+     `(model, hyperparameter)` pair aborts the build rather than being
+     dropped, and the NN1-NN3 "shared search space" claim is checked against
+     the stored bounds rather than assumed.
+   - Naming collisions are called out in the caption: `glmnet`'s `alpha` maps
+     to the paper's $\lambda^{\rho}$ but is its complement (ridge share =
+     1 - alpha), and `lambda.min.ratio` maps to the *floor* of the
+     $\lambda^{\psi}$ path, not $\lambda^{\psi}$ itself.
+   - Table body font changed to `\scriptsize` (matching every other generated
+     table) and the NN1-NN3 column given proportionally more width via
+     tabularx's `\hsize` ratio trick, since its bracketed intervals are the
+     longest in the table; both were needed to stop lines wrapping mid-cell.
 
-- **[FACT]** The combination grid is deterministic:
-  `w = 0, 0.05, ..., 1`, where `w` is the ML weight.
-- **[FACT]** Sharpe ratios use CDI; Information Ratios and active frontiers use
-  IBOV. All inputs now use 15th-to-15th returns.
-- **[FACT]** For a missing single-fund return, `blend()` allocates that month
-  entirely to ML, regardless of the nominal grid weight.
-- **[FACT]** Consequently, `w = 1` is exactly standalone ML, while `w = 0` in a
-  single-fund row means "fund when reporting, ML otherwise," not a pure fund
-  history.
-- **[FACT]** When several grid values tie for a maximum, `which.max()` chooses
-  the first, which is the lowest ML weight because the grid is ascending.
-- **[JUDGMENT]** A deterministic grid is preferable to random two-asset weights:
-  the feasible set is one-dimensional and the grid includes both endpoints.
-- **[OPEN REVIEW ITEM]** Decide whether 5-percentage-point resolution is
-  sufficient or whether reported optima should be checked on a finer grid.
-- **[FACT]** Table labels were shortened to `MED` and `MED_Q75` to prevent line
-  breaks.
-- **[FACT]** Figure 12's caption was shortened substantially.
+## Compilation status
 
-## Plot and table corrections
+- **[FACT]** Pipeline re-run from a clean R session after every code change in
+  this review; exits 0 each time.
+- **[FACT]** Manuscript recompiled (2-3 `pdflatex` passes) after every change;
+  currently 58 pages, 0 LaTeX errors, 0 undefined references, 0 undefined
+  citations.
+- **[FACT]** `bibtex` exits 1 on `references.bib` (duplicate entries / a
+  malformed author list) — this is **pre-existing**, was already an open item
+  in the prior handoff, and is unrelated to this review, since no citations
+  were touched. A `bibtex` pass was skipped for most of this review's
+  recompiles because no citation changed; a full `pdflatex/bibtex/pdflatex
+  x2` sequence was run once (after the fund-picker/spanning patches) and
+  produced the same 58-page, error-free PDF modulo that pre-existing `bibtex`
+  exit.
+- **[FACT]** Overfull-hbox count unchanged at 18 throughout (all pre-existing,
+  in the appendix `mostcitedarticles` tables and prose, none newly introduced).
 
-- **[FACT]** Shared plot base text size is 19 points.
-- **[FACT]** Figure 4 uses a local base size of 16, 14-point axis text, 12-point
-  legend text, and a widened horizontal color bar to avoid overlap.
-- **[FACT]** Figure 5 removes `_bayes` from displayed base-learner names by
-  mutating the data in the `ggplot2::last_plot()` object returned by
-  factoRverse.
-- **[OPEN REVIEW ITEM]** The Figure 5 adjustment depends on factoRverse plot
-  internals (`last_plot()`, a `name` column, and text layers). It currently works
-  but is version-fragile.
-- **[FACT]** Figure 6 now has two panels only: surrogate intercept and surrogate
-  `R^2`. The residual-variance panel was removed and `R^2` is rendered with a
-  superscript through `label_parsed`.
-- **[FACT]** Figure 11 now includes both `AVG_FUND` and `AVG_FUND_Q75`.
-- **[FACT]** These are correlation summaries, not return series. Their diagonal
-  entries are average distinct within-cohort fund correlations and need not
-  equal one.
-- **[FACT]** Table 3's return column is labeled `Ret.` rather than
-  `Ann. Act. Geom. Ret.`.
-- **[FACT]** Generated captions for the new analyses were expanded to define
-  samples, uncertainty, optimization, and ex-post assumptions.
+## What is still open (owner decisions or follow-up work)
 
-## Fund-picker analyses
+1. **Section 5 prose rewrite** — explicitly deferred throughout this review
+   per the repository owner's instruction ("do not rewrite text yet"). Current
+   prose still asserts claims the corrected numbers no longer support:
+   - t-statistics "above 3.0 or 4.0" (ML alphas are now 1.88-2.70 in Table 3,
+     1.77-2.77 in Table 5's style-adjusted specification).
+   - "Best-in-Class achieved a t-stat of 2.68" (now 3.75 CAPM-alpha t-stat in
+     Table 3, but only 0.72 once style-adjusted in Table 5 — the load-bearing
+     asymmetry the paper should lead with).
+   - The spanning-test intercepts (see fix #2 above) are new material with no
+     home in the prose yet.
+2. **`references.bib` duplicate entries** — pre-existing, causes `bibtex` to
+   exit 1; needs the repository owner to say which duplicate is the intended
+   one before de-duplicating.
+3. **Fund-ranking length/volatility disclosure vs. correction** — see item 5
+   above. Disclosed in the caption; whether to additionally correct the
+   ranking (geometric and/or length-adjusted) and re-run everything downstream
+   of `FUNDS_Q75` is an owner call given how much depends on it.
+4. **Basket-size-20 threshold noise** in Table 6 Panel C (see item 1 above) —
+   cosmetic unless the exact cutoff is going to be quoted in text.
+5. **Eight pre-existing dangling `\ref`s** carried over from before this
+   review, never addressed: `absret`, `activecumret`, `relperf`, `downret`,
+   `capture`, `box`, `cor1`, `scatter`, `results`.
 
-### Design facts
+## Build artifact: `manuscript.pdf` always shows as modified
 
-- **[FACT]** `primary_ml_scheme <- "RP"` is fixed in code.
-- **[JUDGMENT]** RP was chosen as the main anchor because it is a transparent,
-  risk-controlled construction, not because it was selected as the ex-post best
-  performer.
-- **[FACT]** Figure 13 still reports all eight ML construction schemes, so the
-  quantile pattern is not shown only for RP.
-- **[FACT]** The RP bootstrap uses 999 circular 12-month block samples with seed
-  `20260727`; funds are re-ranked inside every resample.
-- **[FACT]** Figure 14 uses 1,000 without-replacement basket draws per size, seed
-  `20260728`, except the "all 282" basket, which is deterministic.
-- **[FACT]** Figure 15 uses basket sizes 4, 8, 20, and 40; precision values 0,
-  25, 50, 75, and 100 percent; 500 draws per cell; and seed `20260729`.
-- **[FACT]** The past-only diagnostic uses the preceding 12 months, requires at
-  least 9 finite observations in that history, and evaluates the next month.
-- **[FACT]** The global fund universe for that past-only diagnostic is still
-  restricted to funds with at least 36 observations over the full evaluation
-  sample.
-- **[INFERENCE]** The past-only ranking has no direct return look-ahead, but the
-  full-sample 36-observation eligibility screen is not fully point-in-time.
+- **[FACT]** `pdflatex` output is not byte-reproducible here. Three consecutive
+  compiles of an unchanged `manuscript.tex` produced three different MD5
+  hashes (`642bfea5...`, `fa4fda06...`, `3c29fdb1...`), with the file size
+  drifting by a few kilobytes each time.
+- **[INFERENCE]** This is the usual pdfTeX behaviour: the PDF embeds a
+  `/CreationDate`, `/ModDate` and document `/ID` derived from the wall clock.
+- **[FACT, practical consequence]** `git status` will report
+  `latex_paper/manuscript.pdf` as modified after *any* recompile, whether or
+  not the content changed. A non-empty diff on this file is therefore not
+  evidence that the manuscript changed, and it cannot be used as one.
+- **[OPEN]** Owner decision, if the noise is bothersome. Either (a) accept it
+  and commit the PDF alongside real source changes, which is the current
+  practice; (b) set `SOURCE_DATE_EPOCH` (pdfTeX honours it, together with
+  `FORCE_SOURCE_DATE=1`) to make builds reproducible; or (c) stop tracking the
+  compiled PDF and treat it as a build output. No change made either way —
+  this is a workflow preference, not a defect.
 
-### Numerical results
-
-- **[FACT]** At the ex-post top quartile, RP-human IRs are approximately:
-  human `0.58`, RP `0.49`, best combination `0.59`, RP weight `20%`, and
-  incremental IR about `0.008` before table rounding.
-- **[FACT]** The 999-sample RP top-quartile interval for incremental IR is
-  approximately `[0.000, 0.059]`, displayed as `[0.00, 0.06]`.
-- **[FACT]** The median incremental IR in the basket-size experiment is about
-  `0.01` from basket size 5 onward; the fraction of draws with a strictly
-  positive increment rises from 47 percent for one fund to 100 percent for all
-  282 top-quartile funds.
-- **[FACT]** Under the current threshold code, every reported basket size needs
-  100 percent picker precision for positive median incremental IR.
-- **[FACT]** The past-only row reports human IR `0.25`, best IR `0.72`,
-  incremental IR rounded to `0.00`, and RP weight `100%`.
-
-### Interpretation and edge cases
-
-- **[INFERENCE]** The oracle figures suggest that most of the apparent human
-  advantage comes from knowing future winners, while implementable trailing
-  selection does not improve on RP in this specification.
-- **[INFERENCE]** This is a robustness/calibration result, not evidence that all
-  realistic fund-selection methods fail.
-- **[FACT]** Because both endpoints are in the grid, incremental IR is
-  nonnegative by construction, apart from numerical noise.
-- **[INFERENCE]** A percentile interval with lower bound zero is therefore not a
-  conventional two-sided significance interval. `P(delta > 0)` measures the
-  frequency of a strict interior improvement under the experiment, not the
-  probability that an unconstrained population effect is positive.
-- **[OPEN REVIEW ITEM]** No numerical tolerance is used for `delta > 0`.
-  Near-ties can count as gains even if they round to `0.00`.
-- **[OPEN REVIEW ITEM]** The Table 6 caption defines "Min. likely" as requiring
-  `P(delta IR > 0) >= 75%`, but the code at `plots.R` lines approximately
-  2213-2215 uses `>= 0.5`. Resolve the intended threshold and regenerate.
-- **[JUDGMENT]** Re-ranking funds inside the block bootstrap is preferable to
-  conditioning on the original ranking because it includes ranking
-  instability.
-- **[FACT]** The bootstrap uses percentile bands and re-optimizes the weight in
-  each sample; it is not studentized and does not correct for maximization bias.
-
-## Mean-variance spanning
-
-### Design facts
-
-- **[FACT]** The regression is `Y_t = alpha + B X_t + epsilon_t`.
-- **[FACT]** The joint null for each test asset is `alpha = 0` and
-  `B 1 = 1`.
-- **[FACT]** "ML spans human" uses RP, CS, and MVO_BOX as benchmark assets and
-  `FUNDS_MEAN`, `FUNDS_Q75` as test assets.
-- **[FACT]** "Human spans ML" reverses those sets.
-- **[JUDGMENT]** RP, CS, and MVO_BOX were selected ex ante as low-dimensional
-  representatives of risk-controlled, direct signal-weighted, and constrained
-  mean-variance constructions. This is a modeling choice, not an empirically
-  proven sufficient representation of all ML portfolios.
-- **[FACT]** The asymptotic test uses the standard system covariance implied by
-  common regressors.
-- **[FACT]** The bootstrap uses 999 restricted-residual circular 12-month
-  replications with seeds `20260730` and `20260731`.
-- **[FACT]** Benchmark returns and the benchmark design are held fixed while
-  restricted test-asset residuals are resampled.
-- **[FACT]** Long-only maximum Sharpe and Information Ratios are estimated with
-  SLSQP from the equal-weight start and each vertex.
-
-### Numerical results
-
-- **[FACT]** ML spans human: Wald `71.69`, df `4`, asymptotic p-value below
-  displayed precision, bootstrap p-value `0.001`, design condition number
-  `13.90`, incremental maximum long-only Sharpe `0.028`, incremental maximum
-  long-only IR `0.095`.
-- **[FACT]** Human spans ML: Wald `28.90`, df `6`, asymptotic p-value below
-  displayed precision, bootstrap p-value `0.001`, design condition number
-  `16.89`, incremental maximum long-only Sharpe `0.000`, incremental maximum
-  long-only IR `0.008`.
-
-### Interpretation and edge cases
-
-- **[INFERENCE]** Under the selected assets and full-window sample, both nulls
-  are rejected, so neither selected set spans the other.
-- **[INFERENCE]** This does not establish that the complete universe of ML
-  portfolios and human managers are mutually non-spanning. The conclusion is
-  conditional on the chosen representatives.
-- **[FACT]** `FUNDS_Q75` is ex-post, so the human opportunity set contains an
-  oracle object.
-- **[INFERENCE]** The resulting spanning comparison is best described as an
-  opportunity-set diagnostic or upper-bound exercise, not a fully investable
-  test.
-- **[OPEN REVIEW ITEM]** Assess whether conditioning on observed benchmark
-  returns in the residual bootstrap is the desired inferential design. A joint
-  block bootstrap of all returns or a HAC/GMM spanning test would answer a
-  somewhat different question.
-- **[FACT]** `max(0, expanded - benchmark)` is applied to reported ratio gains.
-  The expanded opportunity set is theoretically nested, so negative gains
-  should only arise from numerical optimization.
-- **[OPEN REVIEW ITEM]** The ratio objective is nonconvex. The current
-  equal-weight-plus-vertices starts are sensible but do not prove a global
-  optimum. Check with a denser set of deterministic starts if these economic
-  deltas are emphasized.
-
-## Manuscript integration and numbering
-
-- **[FACT]** `latex_paper/manuscript.tex` now uses `\input{...}` for generated
-  table and figure snippets rather than embedding large generated blocks.
-- **[FACT]** New objects are included in the compiled manuscript.
-- **[FACT]** The compiled PDF is 58 pages.
-- **[FACT]** Visual inspection covered PDF pages 35-37, 44-46, and 50-52,
-  including Figures 4-6, Figures 13-15, the combination table, Table 6, and
-  Table 7.
-- **[FACT]** No clipping or overlapping text was observed on those pages.
-- **[OPEN REVIEW ITEM]** Generated optional caption arguments contain hard-coded
-  table/figure numbers, while LaTeX also auto-numbers floats. For example, the
-  active-performance snippet's optional caption says "Table 3" but the compiled
-  PDF currently displays it as Table 2. Prefer removing hard-coded numbers from
-  optional captions or making the generation order authoritative.
-- **[FACT]** The manuscript still emits pre-existing warnings for multiply
-  defined labels, overfull boxes, float relocation, and MiKTeX update/log
-  housekeeping.
-- **[FACT]** Manuscript prose was only minimally adjusted for object references.
-  A full narrative rewrite was explicitly deferred.
-
-## Reproduction and verification performed
-
-R executable used:
-
-```powershell
-C:\Users\paulo.fonteles\AppData\Local\Programs\R\R-4.3.0\bin\Rscript.exe
-```
-
-Pipeline command:
+## Reproduction
 
 ```powershell
 & 'C:\Users\paulo.fonteles\AppData\Local\Programs\R\R-4.3.0\bin\Rscript.exe' `
   --vanilla -e ".libPaths(c('renv/library/R-4.3/x86_64-w64-mingw32', .libPaths())); source('plots.R')"
 ```
 
-LaTeX command, run twice from `latex_paper/`:
-
 ```powershell
+cd latex_paper
+pdflatex -interaction=nonstopmode -halt-on-error manuscript.tex
 pdflatex -interaction=nonstopmode -halt-on-error manuscript.tex
 ```
 
-Verification record:
+Run `bibtex manuscript` between the two `pdflatex` passes only if a citation
+changed; it will exit 1 regardless (see "Compilation status" above), but the
+PDF still compiles correctly.
 
-- **[FACT]** `plots.R` parsed successfully.
-- **[FACT]** The full R pipeline completed successfully multiple times after the
-  final edits.
-- **[FACT]** Expected-shortfall warnings appeared for one fund series; these
-  were warnings from the performance function, not fatal pipeline errors.
-- **[FACT]** Both final `pdflatex` passes completed and wrote the 58-page PDF.
-- **[FACT]** `git diff --check` reported no whitespace errors, only LF-to-CRLF
-  conversion warnings for `plots.R` and `manuscript.tex`.
-- **[FACT]** No `bibtex` pass was run during the final verification because the
-  current changes did not modify citations.
-
-## Claude review checklist, in priority order
-
-1. Resolve the 75 percent caption versus 50 percent code mismatch for
-   `min_precision_likely`.
-2. Confirm whether fund ranking should use arithmetic mean monthly return or
-   full-window geometric return, then align captions and code.
-3. Validate the new CDI file semantically: provider, units, first intended
-   series, and daily-return interpretation.
-4. Review partial-month fund-return handling and decide whether a minimum daily
-   coverage/endpoints rule is required.
-5. Audit every return-based table and plot to confirm it derives from
-   fee-adjusted ML returns and that transaction costs are not deducted twice.
-6. Recheck fund aggregation semantics: dynamic available-fund averaging,
-   ex-post Q75 membership, cross-fund medians, and missing-fund allocation to ML.
-7. Review the oracle bootstrap interpretation, strict `delta > 0` comparison,
-   and whether a tolerance or different interval is warranted.
-8. Review the past-only exercise for point-in-time universe eligibility; the
-   ranking is lagged, but the 36-observation universe screen is full-sample.
-9. Independently validate both spanning directions, the restricted-residual
-   bootstrap, and long-only ratio optimization.
-10. Remove hard-coded float numbers from generated optional captions or verify
-    all numbering after manuscript reordering.
-11. Re-run the full pipeline, compile twice, and visually inspect the affected
-    PDF pages before accepting generated binary changes.
-
-## Single next action
-
-Claude should begin with the two concrete code/documentation mismatches in items
-1 and 2 above, then perform an independent quantitative review of the daily
-return and spanning implementations before any commit is created.
+If table or figure *content* needs changing, edit `plots.R` and re-source —
+never edit the generated blocks inside `manuscript.tex`, they will be
+overwritten on the next pipeline run.
