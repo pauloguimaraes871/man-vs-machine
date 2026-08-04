@@ -10,7 +10,7 @@ suite aimed at alignment and leakage failures.
 
 - Branch: `codex/add-gap-panel-scaffold`
 - Baseline commit: `1e175fd feat: add human-machine gap panel scaffold`
-- Current work is uncommitted at the time of this handoff.
+- Implementation commit: `81c191a fix: harden gap panel timing and validation`
 - Relevant files: `build_gap_panel.R`, `DESIGN_NOTE.md`, and `tests/`.
 - Do not include the unrelated `latex_paper/manuscript.pdf` modification or
   untracked `provenance/` directory in this work.
@@ -91,16 +91,11 @@ source("tests/testthat.R")
 source("build_gap_panel.R")
 ```
 
-## Known current issue requiring a decision
-
-`build_gap_panel()` currently contains a bare `browser()` breakpoint. It was
-not introduced by this work and is not suitable for a committed production
-script because it pauses every build. Confirm whether to remove it before
-committing. No other blocker is known.
-
 ## Next action
 
-1. Remove or retain the `browser()` breakpoint as directed by the owner.
-2. Run the two R commands above.
-3. Stage and commit only `build_gap_panel.R`, `DESIGN_NOTE.md`, `tests/`, and
-   `HANDOFF.md`; do not include the manuscript PDF or `provenance/`.
+1. Run the two R commands above in an interactive R session. The agent's
+   headless R runner stalls while activating `renv`, before any tests begin.
+2. Review the panel output and decide whether to uncomment the two `qs::qsave`
+   lines at the end of `build_gap_panel.R` for durable derived-data output.
+3. Keep `latex_paper/manuscript.pdf` and `provenance/` outside any follow-up
+   panel commit unless the owner deliberately expands scope.
