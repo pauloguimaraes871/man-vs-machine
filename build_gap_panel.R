@@ -45,6 +45,7 @@ OUT  <- here::here("data", "derived")
 dir.create(OUT, showWarnings = FALSE, recursive = TRUE)
 
 ROLL_WINDOW <- 36L   # matches min_fund_months (plots.R:170)
+MAX_LEVEL_AGE_DAYS <- 7L
 
 
 # =============================================================================
@@ -66,6 +67,15 @@ DAILY_FILES <- tibble::tribble(
   "n_investors", "n_investors_diarios.xlsx",  "count"
 )
 
+# The evaluation dates must be the actual ML backtest endpoints—not dates
+# inferred from the fund export—so human and machine returns share precisely
+# the same 15th-to-15th windows. This is the pinned paper-run input described
+# in data/meta_port_ind_signals/data.txt.
+ML_BACKTEST_FILE <- file.path(
+  DATA, "meta_port_ind_signals",
+  "gold_2024_05_comdinheiro_meta_port_backtest_results_bundles.qs"
+)
+
 extract_code <- function(x) sub("^.*\n", "", x)
 
 read_economatica_daily <- function(file) {
@@ -83,15 +93,62 @@ read_economatica_daily <- function(file) {
     rlang::abort(paste0(file, ": duplicate fund codes."))
   }
 
+  dates <- as.Date(raw[[1]])
+  if (anyNA(dates) || anyDuplicated(dates) || is.unsorted(dates, strictly = TRUE)) {
+    rlang::abort(paste0(file, ": dates must be non-missing, unique, and sorted."))
+  }
+
   values <- as.matrix(raw[, -1, drop = FALSE])
+  if (any(!is.finite(values) & !is.na(values))) {
+    rlang::abort(paste0(file, ": values may be missing but not infinite."))
+  }
   colnames(values) <- codes
-  list(dates = as.Date(raw[[1]]), values = values, codes = codes)
+  list(dates = dates, values = values, codes = codes)
 }
 
 # Read all four once, keyed by name.
 read_all_daily <- function() {
   purrr::set_names(DAILY_FILES$file, DAILY_FILES$key) %>%
     purrr::map(read_economatica_daily)
+}
+
+# Read the ML evaluation index without relying on plots.R having been sourced.
+# `qs` stored the xts date index numerically in some paper-run artefacts, so
+# restore it explicitly before validating the calendar convention below.
+read_ml_index <- function(path = ML_BACKTEST_FILE) {
+  if (!file.exists(path)) {
+    rlang::abort(sprintf("Pinned ML backtest file does not exist: %s", path))
+  }
+  if (!requireNamespace("qs", quietly = TRUE) ||
+      !requireNamespace("factoRverse", quietly = TRUE)) {
+    rlang::abort("read_ml_index() requires the qs and factoRverse packages.")
+  }
+
+  meta_result <- qs::qread(path)
+  backtest <- meta_result$backtest_meta_portfolios_results
+  if (is.null(backtest) || is.null(backtest$ibov_port_backtest_cohort)) {
+    rlang::abort("Pinned ML backtest is missing ibov_port_backtest_cohort.")
+  }
+  cohort <- backtest$ibov_port_backtest_cohort
+  if (!base::isS4(cohort) ||
+      !("port_returns_m_xts_list" %in% methods::slotNames(cohort))) {
+    rlang::abort("ibov_port_backtest_cohort has an unexpected structure.")
+  }
+  net_returns <- cohort@port_returns_m_xts_list$net_returns_m_xts
+  if (!base::isS4(net_returns) ||
+      !("data" %in% methods::slotNames(net_returns))) {
+    rlang::abort("ML net-return series has an unexpected structure.")
+  }
+
+  index <- zoo::index(net_returns@data)
+  if (is.numeric(index)) {
+    index <- as.Date(
+      as.POSIXct(as.numeric(index), origin = "1970-01-01", tz = "UTC")
+    )
+  } else {
+    index <- as.Date(index)
+  }
+  validate_ml_index(index)
 }
 
 
@@ -129,11 +186,23 @@ reconcile_codes <- function(daily) {
 # The sheet's own column names are blank and the REAL header sits in row 1 of
 # the data, so read it then drop that row.
 
-CAD_COLS <- c(status = 6L, code = 8L, anbima_class = 9L, efpc = 10L,
+CAD_COLS <- c(fund_name = 2L, status = 6L, code = 8L, anbima_class = 9L, efpc = 10L,
               multigestor = 11L, fundo_cotas = 12L, perf_fee = 13L,
               investor_type = 14L, leveraged = 15L, redemption = 17L,
               gestora = 18L, administradora = 19L, taxa_adm = 22L,
               inception = 25L)
+
+# Curated, owner-supplied validation set. These are known Brazilian systematic
+# or factor-based funds, resolved against the 2026-08-04 cadastral snapshot by
+# ANBIMA code. This is a diagnostic label, never a classifier for the paper's
+# main estimand; the code check fails loudly if a future source snapshot drops
+# one of these ANBIMA codes.
+QUANT_VALIDATION_CODES <- c(
+  "156019", "155942", "546534", "520845", "521280", "227102",
+  "599603", "263435", "C0001245902", "579491", "579572", "596531",
+  "C0001244914", "668117", "667501", "668125", "528404", "410322",
+  "732079", "506060"
+)
 
 BANK_PATTERN <- paste0(
   "ita.|bradesco|banco do brasil|santander|caixa|safra|btg|banrisul|",
@@ -148,17 +217,41 @@ parse_excel_date <- function(x) {            # Excel serials stored as TEXT
   as.Date(suppressWarnings(as.numeric(as.character(x))), origin = "1899-12-30")
 }
 
+add_quant_validation_label <- function(static_df) {
+  if (!all(c("code", "fund_name") %in% names(static_df)) || anyDuplicated(static_df$code)) {
+    rlang::abort("Static fund data must have unique code and fund_name columns.")
+  }
+  static_df %>%
+    dplyr::mutate(quant_validation_label = .data$code %in% QUANT_VALIDATION_CODES)
+}
+
+assert_quant_validation_labels <- function(static_df) {
+  found <- static_df$code[static_df$quant_validation_label]
+  missing <- setdiff(QUANT_VALIDATION_CODES, found)
+  if (length(missing) > 0L) {
+    rlang::abort(paste0(
+      "Curated quant validation code(s) missing from cadastral data: ",
+      paste(missing, collapse = ", ")
+    ))
+  }
+  if (sum(static_df$quant_validation_label) != length(QUANT_VALIDATION_CODES)) {
+    rlang::abort("Curated quant validation labels are not one-to-one with ANBIMA codes.")
+  }
+  invisible(TRUE)
+}
+
 build_static <- function() {
   raw <- readxl::read_excel(file.path(DATA, "dados_cadastrais.xlsx"),
                             .name_repair = "minimal")
 
-  CAD_COLS %>%
+  static <- CAD_COLS %>%
     purrr::map(~ trimws(as.character(raw[[.x]]))) %>%
     tibble::as_tibble() %>%
     dplyr::slice(-1) %>%                              # drop header-as-data row
     dplyr::filter(!is.na(code), code != "") %>%
     dplyr::transmute(
       code,
+      fund_name,
       anbima_class,
       gestora,
       administradora,
@@ -184,18 +277,24 @@ build_static <- function() {
       bank_affiliated = grepl(BANK_PATTERN, paste(gestora, administradora),
                               ignore.case = TRUE),
 
-      # Diagnostic only (DESIGN_NOTE.md S9). Miguel & Chen (2025) show the label
-      # does not identify the behaviour. Never a headline split.
-      name_quant = grepl("quantitativ|sistem.tic|multifator",
-                         paste(gestora, anbima_class), ignore.case = TRUE)
+      # Diagnostic only (DESIGN_NOTE.md S9). A keyword flag is deliberately
+      # broad and non-authoritative; `quant_validation_label` below is the
+      # curated owner-supplied set used solely to validate this diagnostic.
+      name_quant_keyword = grepl("quantitativ|sistem.tic|multifator",
+                                 paste(fund_name, gestora, anbima_class), ignore.case = TRUE)
     ) %>%
+    add_quant_validation_label() %>%
     dplyr::mutate(
+      name_quant = quant_validation_label | name_quant_keyword,
       anbima_class_ext = dplyr::case_when(
         name_quant ~ "Quantitativo",
         is_fof     ~ "Multifundos",
         TRUE       ~ anbima_class
       )
     )
+
+  assert_quant_validation_labels(static)
+  static
 }
 
 build_gestora_static <- function(static_df) {
@@ -219,29 +318,68 @@ build_gestora_static <- function(static_df) {
 # and understating standard errors.
 #
 # No master ID exists in the cadastral file, so detect duplicates from returns:
-# near-unit correlation over a decent overlap. O(n^2) -- run once and cache.
+# near-unit correlation over a decent overlap.  Clusters are connected
+# components, not just direct matches to the first fund encountered: if A~B
+# and B~C, all three belong to one cluster even when A~C falls below the cut.
+# This function RETAINS every legal fund identity.  Collapse to one return
+# representative only for a strategy-level performance estimand; retain and
+# aggregate all vehicles for AUM and flow analyses.
 
 find_duplicate_clusters <- function(ret_mat, min_overlap = 24L, rho_cut = 0.999) {
+  if (!is.matrix(ret_mat) || !is.numeric(ret_mat)) {
+    rlang::abort("ret_mat must be a numeric matrix.")
+  }
   codes <- colnames(ret_mat)
   n     <- length(codes)
-  owner <- seq_len(n)
+  if (n == 0L || anyNA(codes) || any(!nzchar(codes)) || anyDuplicated(codes)) {
+    rlang::abort("ret_mat must have non-empty, unique column names.")
+  }
+  if (length(min_overlap) != 1L || !is.finite(min_overlap) ||
+      min_overlap < 2L || min_overlap != as.integer(min_overlap)) {
+    rlang::abort("min_overlap must be an integer of at least 2.")
+  }
+  if (length(rho_cut) != 1L || !is.finite(rho_cut) || rho_cut < -1 || rho_cut > 1) {
+    rlang::abort("rho_cut must lie between -1 and 1.")
+  }
 
-  for (i in seq_len(n - 1L)) {
-    if (owner[i] != i) next
+  # `component` implements union-by-relabeling.  For this ~2,000-fund use
+  # case it is transparent, and unlike one-pass owner assignment it is
+  # transitive.
+  component <- seq_len(n)
+
+  if (n > 1L) for (i in seq_len(n - 1L)) {
     xi <- ret_mat[, i]
     for (j in (i + 1L):n) {
-      if (owner[j] != j) next
+      if (component[i] == component[j]) next
       ok <- is.finite(xi) & is.finite(ret_mat[, j])
       if (sum(ok) < min_overlap) next
       r <- suppressWarnings(stats::cor(xi[ok], ret_mat[ok, j]))
-      if (is.finite(r) && r >= rho_cut) owner[j] <- i
+      if (is.finite(r) && r >= rho_cut) {
+        component[component == component[j]] <- component[i]
+      }
     }
   }
 
-  tibble::tibble(code = codes, dup_cluster = codes[owner])
+  # A lexicographic representative makes cluster labels independent of the
+  # order in which the source columns happened to arrive.
+  cluster_label <- vapply(
+    split(codes, component),
+    min,
+    character(1)
+  )
+  dup_cluster <- unname(cluster_label[as.character(component)])
+  cluster_size <- as.integer(table(dup_cluster)[dup_cluster])
+
+  tibble::tibble(
+    code = codes,
+    dup_cluster,
+    cluster_size,
+    is_duplicate = cluster_size > 1L
+  )
 }
 
-# Keep one representative per cluster: longest history, then cheapest.
+# Optional strategy-level return representative: longest history, then cheapest.
+# Do not apply this selection to legal-fund AUM or flow aggregates.
 pick_cluster_representative <- function(dup_df, static_df, obs_count) {
   dup_df %>%
     dplyr::left_join(tibble::enframe(obs_count, "code", "n_obs"), by = "code") %>%
@@ -257,34 +395,89 @@ pick_cluster_representative <- function(dup_df, static_df, obs_count) {
 # =============================================================================
 # S5. Fund-level time-varying covariates  (GROUP A)
 # =============================================================================
-# Daily data removes the month-end/15th mismatch: sample levels AT the 15th that
-# OPENS each window (predetermined, therefore a clean regressor) and SUM flows
-# over the preceding window.
+# `ml_index` labels the END of each return window.  For example, the return
+# labelled 2016-01-15 covers (2015-12-15, 2016-01-15].  Therefore AUM and
+# investor counts for that row are sampled at 2015-12-15, the window OPENING:
+# sampling them on 2016-01-15 would embed the period's realised return and
+# flows.  Daily data lets this timing be exact rather than relying on a
+# month-end proxy.
 #
 # Flows need care. Net flow DURING a window is caused by return during that
 # window (performance chasing), so only LAGGED window flow is a predictor.
 # Contemporaneous flow is an outcome and needs its own identification argument.
 
 # Level as of each window opening: last observation at or before the date.
-sample_at <- function(obj, when, codes) {
+# A daily feed should be no more than a few calendar days stale around a market
+# holiday.  Abort rather than quietly treating an old level as opening AUM.
+sample_at <- function(obj, when, codes, max_age_days = MAX_LEVEL_AGE_DAYS) {
+  when <- as.Date(when)
+  if (anyNA(when) || anyDuplicated(when) || is.unsorted(when, strictly = TRUE)) {
+    rlang::abort("when must contain non-missing, unique, sorted dates.")
+  }
+  if (length(max_age_days) != 1L || !is.finite(max_age_days) ||
+      max_age_days < 0 || max_age_days != as.integer(max_age_days)) {
+    rlang::abort("max_age_days must be a non-negative integer.")
+  }
+  if (is.null(obj$dates) || anyNA(obj$dates) || anyDuplicated(obj$dates) ||
+      is.unsorted(obj$dates, strictly = TRUE)) {
+    rlang::abort("Daily-panel dates must be non-missing, unique, and sorted.")
+  }
+
   idx <- findInterval(when, obj$dates)
   out <- matrix(NA_real_, length(when), length(codes),
                 dimnames = list(NULL, codes))
   hit <- idx > 0
+  age_days <- as.integer(when[hit] - obj$dates[idx[hit]])
+  if (any(age_days > max_age_days)) {
+    first <- which(hit)[which(age_days > max_age_days)[1L]]
+    rlang::abort(sprintf(
+      "Latest daily level is %d days old at opening date %s (maximum allowed: %d).",
+      age_days[which(age_days > max_age_days)[1L]], as.character(when[first]), max_age_days
+    ))
+  }
   out[hit, ] <- obj$values[idx[hit], codes, drop = FALSE]
   out
 }
 
-# Flow summed over (previous window open, this window open].
-sum_over_window <- function(obj, when, codes) {
-  prev <- c(as.Date(NA), utils::head(when, -1))
-  purrr::map2(prev, when, function(from, to) {
-    sel <- !is.na(from) & obj$dates > from & obj$dates <= to
+# Validate the exact calendar convention used by the ML backtest and the
+# 15th-to-15th fund-return windows.
+validate_ml_index <- function(period_ends) {
+  period_ends <- as.Date(period_ends)
+  if (length(period_ends) == 0L || anyNA(period_ends) ||
+      anyDuplicated(period_ends) || is.unsorted(period_ends, strictly = TRUE) ||
+      any(format(period_ends, "%d") != "15")) {
+    rlang::abort("period_ends must be non-missing, consecutive calendar 15ths.")
+  }
+  expected <- seq.Date(min(period_ends), max(period_ends), by = "month")
+  if (length(period_ends) != length(expected) || any(period_ends != expected)) {
+    rlang::abort("period_ends must be non-missing, consecutive calendar 15ths.")
+  }
+  period_ends
+}
+
+# Return-window opening dates for periods labelled by their closing 15th.
+window_openings <- function(period_ends) {
+  period_ends <- validate_ml_index(period_ends)
+  c(as.Date(format(period_ends[[1]] - 20, "%Y-%m-15")),
+    period_ends[-length(period_ends)])
+}
+
+# Flow summed over (window opening, window closing]. This is contemporaneous
+# with the labelled return; only its lag is eligible as a predictor.
+sum_over_window <- function(obj, period_ends, codes) {
+  openings <- window_openings(period_ends)
+  purrr::map2(openings, period_ends, function(from, to) {
+    sel <- obj$dates > from & obj$dates <= to
     if (!any(sel)) return(rep(NA_real_, length(codes)))
-    colSums(obj$values[sel, codes, drop = FALSE], na.rm = TRUE)
+    window_values <- obj$values[sel, codes, drop = FALSE]
+    out <- colSums(window_values, na.rm = TRUE)
+    # Keep an unreported fund-window missing. Only the aggregate functions
+    # deliberately convert an all-missing gestora or industry period to zero.
+    out[colSums(!is.na(window_values)) == 0L] <- NA_real_
+    out
   }) %>%
     purrr::reduce(rbind) %>%
-    matrix(nrow = length(when), dimnames = list(NULL, codes))
+    matrix(nrow = length(period_ends), dimnames = list(NULL, codes))
 }
 
 matrix_to_long <- function(mat, when, value_name) {
@@ -293,9 +486,19 @@ matrix_to_long <- function(mat, when, value_name) {
     tidyr::pivot_longer(-period, names_to = "code", values_to = value_name)
 }
 
+# Make the missing-data policy explicit.  A gestora or period with no reported
+# values has zero observed AUM/flow in this constructed panel, rather than an
+# accidental zero produced only as a side effect of `sum(..., na.rm = TRUE)`.
+sum_or_zero <- function(x) {
+  if (length(x) == 0L || all(is.na(x))) return(0)
+  sum(x, na.rm = TRUE)
+}
+
 build_fund_timevarying <- function(daily, ml_index, codes) {
+  openings <- window_openings(ml_index)
+
   levels_long <- list(aum = "aum", n_investors = "n_investors") %>%
-    purrr::imap(~ sample_at(daily[[.x]], ml_index, codes) %>%
+    purrr::imap(~ sample_at(daily[[.x]], openings, codes) %>%
                   matrix_to_long(ml_index, .y))
 
   flow_long <- sum_over_window(daily$net_flow, ml_index, codes) %>%
@@ -306,10 +509,12 @@ build_fund_timevarying <- function(daily, ml_index, codes) {
     dplyr::arrange(code, period) %>%
     dplyr::group_by(code) %>%
     dplyr::mutate(
-      flow_rate     = net_flow / dplyr::lag(aum),
+      # AUM is already the period-opening value, so it is the economically
+      # correct denominator for the current window's flow rate.
+      flow_rate     = net_flow / aum,
       flow_rate_lag = dplyr::lag(flow_rate),          # the usable predictor
-      flow_vol_12   = zoo::rollapplyr(flow_rate, 12, stats::sd,
-                                      fill = NA, na.rm = TRUE),
+      flow_vol_12   = zoo::rollapplyr(flow_rate_lag, 12, stats::sd,
+                                       fill = NA, na.rm = TRUE),
       log_pl_fundo  = log(pmax(aum, 1e-8)),
       log_investors = log(pmax(n_investors, 1))
     ) %>%
@@ -322,7 +527,8 @@ build_gestora_timevarying <- function(fund_tv, static_df) {
     dplyr::filter(!is.na(gestora)) %>%
     dplyr::group_by(gestora, period) %>%
     dplyr::summarise(
-      pl_gestora        = sum(aum, na.rm = TRUE),
+      pl_gestora        = sum_or_zero(aum),
+      gestora_net_flow  = sum_or_zero(net_flow),
       n_funds_reporting = sum(!is.na(aum)),
       .groups = "drop"
     ) %>%
@@ -343,8 +549,10 @@ build_gestora_timevarying <- function(fund_tv, static_df) {
 #
 # WHAT IS SAFE TO COMPUTE
 #   w_cum_k      cumulative weight of the k largest positions
-#   hhi_top15    sum of squared top-15 weights = a LOWER BOUND on true HHI
-#   resid_weight 100 - w_cum_15 = weight held outside the top 15
+#   hhi_top15    sum of squared top-15 NAV weights; a lower bound on true HHI
+#                for a net-long, NAV-normalised book
+#   resid_weight 100 - w_cum_15 = weight held outside the top 15, only when
+#                cumulative top-15 weight does not materially exceed NAV
 #   n_pos_min    HARD lower bound on the number of positions, no distributional
 #                assumption: every unseen position is at most w_(15), so
 #                  n_pos_min = 15 + ceiling(resid_weight / w_15)
@@ -377,6 +585,8 @@ build_gestora_timevarying <- function(fund_tv, static_df) {
 #   by design, and large funds cannot concentrate in small caps.
 
 TOPX_MAX <- 15L
+TOPX_NAV_TOLERANCE_PCT <- 2
+TOPX_SOFT_CUM_WEIGHT_PCT <- 110
 
 PT_MONTHS <- c(Jan = 1, Fev = 2, Mar = 3, Abr = 4,  Mai = 5,  Jun = 6,
                Jul = 7, Ago = 8, Set = 9, Out = 10, Nov = 11, Dez = 12)
@@ -423,6 +633,53 @@ read_topx_all <- function(max_rank = TOPX_MAX) {
     dplyr::filter(!is.na(w))
 }
 
+# Validate the partial-holdings input without treating modest NAV overages as
+# impossible. A leveraged fund can legitimately have gross long exposure above
+# 100%; the 2pp tolerance also absorbs rounded reported weights. Above that
+# tolerance, lower-bound position counts are not identified from these fields.
+validate_concentration_input <- function(topx_long,
+                                         soft_cum_weight = TOPX_SOFT_CUM_WEIGHT_PCT) {
+  required <- c("code", "month", "rank", "w")
+  if (!is.data.frame(topx_long) || !all(required %in% names(topx_long)) ||
+      nrow(topx_long) == 0L) {
+    rlang::abort("topx_long must be a non-empty data frame with code, month, rank, and w.")
+  }
+  if (anyNA(topx_long$code) || any(!nzchar(topx_long$code)) ||
+      anyNA(topx_long$month) || any(!is.finite(topx_long$rank)) ||
+      any(!is.finite(topx_long$w)) || any(topx_long$rank < 1L) ||
+      any(topx_long$rank > TOPX_MAX) || any(topx_long$rank != as.integer(topx_long$rank)) ||
+      any(topx_long$w < 0) || anyDuplicated(topx_long[c("code", "month", "rank")])) {
+    rlang::abort("Top-X holdings must have unique code-month-rank keys, ranks 1..TOPX_MAX, and finite non-negative weights.")
+  }
+  if (length(soft_cum_weight) != 1L || !is.finite(soft_cum_weight) ||
+      soft_cum_weight <= 100) {
+    rlang::abort("soft_cum_weight must be a finite percentage above 100.")
+  }
+
+  diagnostics <- topx_long %>%
+    dplyr::arrange(code, month, rank) %>%
+    dplyr::group_by(code, month) %>%
+    dplyr::summarise(
+      ranks_contiguous = all(rank == seq_len(dplyr::n())),
+      weights_descend  = all(diff(w) <= 1e-8),
+      w_cum_15         = sum(w),
+      .groups = "drop"
+    )
+  if (any(!diagnostics$ranks_contiguous | !diagnostics$weights_descend)) {
+    rlang::abort("Top-X ranks must be contiguous from 1 and weights must be non-increasing within each fund-month.")
+  }
+
+  high_weight <- dplyr::filter(diagnostics, w_cum_15 > soft_cum_weight)
+  if (nrow(high_weight) > 0L) {
+    rlang::warn(sprintf(
+      "%d fund-month(s) have cumulative top-%d weights above %.0f%% of NAV (first: %s, %s). Review leverage or source units.",
+      nrow(high_weight), TOPX_MAX, soft_cum_weight,
+      high_weight$code[1L], as.character(high_weight$month[1L])
+    ))
+  }
+  topx_long
+}
+
 # Fit log w_(k) ~ log k. Needs >= 4 ranks to be meaningful.
 fit_decay_slope <- function(rank, w) {
   ok <- is.finite(w) & w > 0 & is.finite(rank) & rank > 0
@@ -431,6 +688,8 @@ fit_decay_slope <- function(rank, w) {
 }
 
 summarise_concentration <- function(topx_long) {
+  topx_long <- validate_concentration_input(topx_long)
+
   topx_long %>%
     dplyr::arrange(code, month, rank) %>%
     dplyr::group_by(code, month) %>%
@@ -446,21 +705,32 @@ summarise_concentration <- function(topx_long) {
       .groups = "drop"
     ) %>%
     dplyr::mutate(
-      resid_weight = pmax(100 - w_cum_15, 0),
+      # A residual-weight / minimum-position bound assumes net long weights
+      # measured against NAV. Preserve the inference under minor rounding, but
+      # leave it unavailable when gross top-15 exposure materially exceeds NAV.
+      weight_over_nav = w_cum_15 > 100 + TOPX_NAV_TOLERANCE_PCT,
+      resid_weight = dplyr::if_else(
+        weight_over_nav, NA_real_, pmax(100 - w_cum_15, 0)
+      ),
       # Hard lower bound, no distributional assumption: every unseen position
-      # is at most as large as the smallest observed one.
+      # is at most as large as the smallest observed one. Not identified for a
+      # materially levered (top-15 > NAV) book.
       n_pos_min = dplyr::if_else(
-        is.finite(w_last) & w_last > 0,
+        !weight_over_nav & is.finite(w_last) & w_last > 0,
         n_ranks + ceiling(resid_weight / w_last),
         NA_real_
       ),
-      eff_bets_max = dplyr::if_else(hhi_top15 > 0, 1 / hhi_top15, NA_real_)
+      eff_bets_max = dplyr::if_else(
+        !weight_over_nav & hhi_top15 > 0, 1 / hhi_top15, NA_real_
+      )
     )
 }
 
-# Attach a month-end holdings snapshot to the window it can legitimately
-# explain: the one OPENING after that month ends. Same predetermination logic
-# as the AUM lag in S5.
+# `period` labels the CLOSING 15th of a return window. A month-end holdings
+# snapshot is attached to the first *full* 15th-to-15th return window that
+# starts after the snapshot is observable. For example, a November month-end
+# snapshot maps to the return labelled 15 January, not 15 December: the latter
+# window began on 15 November and would partially precede the snapshot.
 build_concentration_panel <- function(ml_index, max_rank = TOPX_MAX) {
   conc <- read_topx_all(max_rank) %>% summarise_concentration()
 
@@ -468,7 +738,7 @@ build_concentration_panel <- function(ml_index, max_rank = TOPX_MAX) {
     dplyr::mutate(month_key = as.Date(format(period, "%Y-%m-01")))
 
   conc %>%
-    dplyr::mutate(month_key = shift_month(month, 1L)) %>%
+    dplyr::mutate(month_key = shift_month(month, 2L)) %>%
     dplyr::inner_join(window_for_month, by = "month_key") %>%
     dplyr::select(-month_key) %>%
     dplyr::arrange(code, period) %>%
@@ -512,8 +782,8 @@ build_industry_panel <- function(fund_tv) {
   fund_tv %>%
     dplyr::group_by(period) %>%
     dplyr::summarise(
-      industry_pl       = sum(aum, na.rm = TRUE),
-      industry_net_flow = sum(net_flow, na.rm = TRUE),
+      industry_pl       = sum_or_zero(aum),
+      industry_net_flow = sum_or_zero(net_flow),
       n_reporting       = sum(!is.na(aum)),
       .groups = "drop"
     ) %>%
@@ -575,7 +845,6 @@ build_state_panel <- function(ml_index, industry_panel) {
     )
 }
 
-
 # =============================================================================
 # S8. Dependent variable and mediators  (GROUP D)
 # =============================================================================
@@ -601,14 +870,38 @@ FF_PREDICTORS <- c("mkt_e", "hml_n", "mom_n", "rmw_n", "smb_n", "cma_n")
 # Returns the design pieces as plain matrices: everything downstream is linear
 # algebra, and lm() per fund-period would be ~200k model-frame constructions.
 align_factors <- function(ret_ym, factor_mat) {
-  idx <- match(ret_ym, factor_mat$ym)
+  required <- c("ym", "rf", FF_PREDICTORS)
+  if (!is.data.frame(factor_mat) || !all(required %in% names(factor_mat))) {
+    rlang::abort(sprintf("factor_mat must contain: %s.",
+                         paste(required, collapse = ", ")))
+  }
+  factor_ym <- as.character(factor_mat$ym)
+  if (anyNA(factor_ym) || any(!nzchar(factor_ym)) || anyDuplicated(factor_ym)) {
+    rlang::abort("factor_mat$ym must be non-missing and unique.")
+  }
+  if (!all(vapply(factor_mat[required[-1L]], is.numeric, logical(1)))) {
+    rlang::abort("factor_mat$rf and all factor columns must be numeric.")
+  }
+
+  ret_ym <- as.character(ret_ym)
+  if (anyNA(ret_ym) || any(!nzchar(ret_ym)) || anyDuplicated(ret_ym) ||
+      is.unsorted(ret_ym, strictly = TRUE)) {
+    rlang::abort("ret_ym must be non-missing, unique, and strictly sorted.")
+  }
+
+  idx <- match(ret_ym, factor_ym)
   if (anyNA(idx)) {
     rlang::abort(sprintf("factor_mat is missing %d of %d periods (first: %s).",
                          sum(is.na(idx)), length(idx), ret_ym[which(is.na(idx))[1]]))
   }
+  F <- as.matrix(factor_mat[idx, FF_PREDICTORS, drop = FALSE])
+  rf <- as.numeric(factor_mat$rf[idx])
+  if (any(!is.finite(F)) || any(!is.finite(rf))) {
+    rlang::abort("factor_mat has non-finite factor or risk-free values in the requested periods.")
+  }
   list(
-    F  = as.matrix(factor_mat[idx, FF_PREDICTORS, drop = FALSE]),
-    rf = as.numeric(factor_mat$rf[idx])
+    F  = F,
+    rf = rf
   )
 }
 
@@ -628,17 +921,38 @@ align_factors <- function(ret_ym, factor_mat) {
 # skill the paper is trying to measure.
 #
 # Strictly trailing -- period t contributes nothing to its own betas -- so `ra`
-# carries no look-ahead and consecutive observations do not overlap. That is the
-# whole reason for using realised residuals instead of rolling alpha estimates:
-# a rolling alpha is a window average, so its successive values share ~35 of 36
-# observations, the effective sample size collapses, and every standard error
-# downstream becomes wrong.
+# carries no look-ahead. The realised period-t outcomes themselves do not
+# overlap, unlike rolling-alpha estimates. Their trailing beta fits do share
+# history, however, so residuals can still be serially dependent; downstream
+# inference must retain fund and period clustering.
 # -----------------------------------------------------------------------------
 rolling_risk_adjusted <- function(ret_mat, ret_ym, factor_mat,
-                                  window = ROLL_WINDOW, min_obs = 24L) {
-  stopifnot(is.matrix(ret_mat), nrow(ret_mat) == length(ret_ym))
+                                  window = ROLL_WINDOW, min_obs = ROLL_WINDOW) {
+  if (!is.matrix(ret_mat) || !is.numeric(ret_mat) || ncol(ret_mat) == 0L ||
+      nrow(ret_mat) != length(ret_ym)) {
+    rlang::abort("ret_mat must be a non-empty numeric matrix with one row per ret_ym period.")
+  }
+  if (any(!is.finite(ret_mat) & !is.na(ret_mat))) {
+    rlang::abort("ret_mat may contain missing values but not infinite values.")
+  }
+  if (is.null(colnames(ret_mat)) || anyNA(colnames(ret_mat)) ||
+      any(!nzchar(colnames(ret_mat))) || anyDuplicated(colnames(ret_mat))) {
+    rlang::abort("ret_mat must have non-missing, unique column names.")
+  }
+  if (length(window) != 1L || !is.finite(window) || window < 1L ||
+      window != as.integer(window)) {
+    rlang::abort("window must be a positive integer.")
+  }
+  if (length(min_obs) != 1L || !is.finite(min_obs) || min_obs < 1L ||
+      min_obs != as.integer(min_obs) || min_obs > window) {
+    rlang::abort("min_obs must be a positive integer no larger than window.")
+  }
   if (min_obs <= length(FF_PREDICTORS) + 1L) {
     rlang::abort("min_obs must exceed the number of coefficients (7).")
+  }
+  if (nrow(ret_mat) <= window) {
+    rlang::abort(sprintf("ret_mat needs more than %d periods for a %d-period trailing fit.",
+                         window, window))
   }
 
   fac    <- align_factors(ret_ym, factor_mat)
@@ -652,6 +966,11 @@ rolling_risk_adjusted <- function(ret_mat, ret_ym, factor_mat,
   for (t in seq.int(window + 1L, n_per)) {
     rows <- seq.int(t - window, t - 1L)
     X    <- cbind(1, fac$F[rows, , drop = FALSE])
+    qr_x <- qr(X)
+    if (qr_x$rank < ncol(X)) {
+      rlang::abort(sprintf("Factor design is rank deficient in the trailing window ending at period %s.",
+                           as.character(ret_ym[t - 1L])))
+    }
     Yw   <- y_e[rows, , drop = FALSE]
     ft   <- fac$F[t, ]
     yt   <- y_e[t, ]
@@ -664,7 +983,7 @@ rolling_risk_adjusted <- function(ret_mat, ret_ym, factor_mat,
     # their betas come from a single solve.
     full <- usable & n_ok == window
     if (any(full)) {
-      B <- qr.solve(X, Yw[, full, drop = FALSE])              # (1+k) x n_full
+      B <- qr.coef(qr_x, Yw[, full, drop = FALSE])             # (1+k) x n_full
       ra[t, full] <- yt[full] - as.numeric(ft %*% B[-1L, , drop = FALSE])
       nb[t, full] <- window
     }
@@ -672,10 +991,11 @@ rolling_risk_adjusted <- function(ret_mat, ret_ym, factor_mat,
     # Slow path: gappy columns need their own complete-case design.
     for (j in which(usable & !full)) {
       keep <- !is.na(Yw[, j])
-      fit  <- tryCatch(.lm.fit(X[keep, , drop = FALSE], Yw[keep, j]),
-                       error = function(e) NULL)
-      if (is.null(fit) || anyNA(fit$coefficients)) next
-      ra[t, j] <- yt[j] - sum(ft * fit$coefficients[-1L])
+      qr_j <- qr(X[keep, , drop = FALSE])
+      if (qr_j$rank < ncol(X)) next
+      coef_j <- qr.coef(qr_j, Yw[keep, j])
+      if (anyNA(coef_j)) next
+      ra[t, j] <- yt[j] - sum(ft * coef_j[-1L])
       nb[t, j] <- sum(keep)
     }
   }
@@ -693,29 +1013,43 @@ rolling_risk_adjusted <- function(ret_mat, ret_ym, factor_mat,
 # (OLS ... NN3) to test H7 -- if the gap against OLS matches the gap against
 # NN3, the story is systematisation, not machine learning.
 # -----------------------------------------------------------------------------
-build_dv <- function(fund_ret_mat, ml_ret_mat, ret_ym, factor_mat,
-                     ml_col, window = ROLL_WINDOW, min_obs = 24L) {
+build_dv <- function(fund_ret_mat, ml_ret_mat, period, factor_mat,
+                     ml_col,
+                     factor_ym = if (inherits(period, "Date")) {
+                       format(period, "%Y-%m")
+                     } else {
+                       as.character(period)
+                     },
+                     window = ROLL_WINDOW, min_obs = ROLL_WINDOW) {
+  if (length(period) != nrow(fund_ret_mat) || anyNA(period) ||
+      anyDuplicated(period) || is.unsorted(period, strictly = TRUE)) {
+    rlang::abort("period must be non-missing, unique, sorted, and match fund_ret_mat rows.")
+  }
+  if (!is.matrix(ml_ret_mat) || !is.numeric(ml_ret_mat) ||
+      nrow(ml_ret_mat) != length(period)) {
+    rlang::abort("ml_ret_mat must be a numeric matrix with one row per period.")
+  }
   if (!ml_col %in% colnames(ml_ret_mat)) {
     rlang::abort(sprintf("'%s' is not a column of ml_ret_mat.", ml_col))
   }
 
-  fund_ra <- rolling_risk_adjusted(fund_ret_mat, ret_ym, factor_mat, window, min_obs)
+  fund_ra <- rolling_risk_adjusted(fund_ret_mat, factor_ym, factor_mat, window, min_obs)
   ml_ra   <- rolling_risk_adjusted(ml_ret_mat[, ml_col, drop = FALSE],
-                                   ret_ym, factor_mat, window, min_obs)
+                                   factor_ym, factor_mat, window, min_obs)
 
-  ml_series <- tibble::tibble(period_idx = seq_along(ret_ym),
+  ml_series <- tibble::tibble(period = period,
                               ra_ml      = as.numeric(ml_ra$ra[, 1L]))
 
   tibble::as_tibble(fund_ra$ra) %>%
-    dplyr::mutate(period_idx = dplyr::row_number()) %>%
-    tidyr::pivot_longer(-period_idx, names_to = "code", values_to = "ra_fund") %>%
+    dplyr::mutate(period = period) %>%
+    tidyr::pivot_longer(-period, names_to = "code", values_to = "ra_fund") %>%
     dplyr::left_join(
       tibble::as_tibble(fund_ra$n_obs) %>%
-        dplyr::mutate(period_idx = dplyr::row_number()) %>%
-        tidyr::pivot_longer(-period_idx, names_to = "code", values_to = "n_obs_beta"),
-      by = c("period_idx", "code")
+        dplyr::mutate(period = period) %>%
+        tidyr::pivot_longer(-period, names_to = "code", values_to = "n_obs_beta"),
+      by = c("period", "code")
     ) %>%
-    dplyr::left_join(ml_series, by = "period_idx") %>%
+    dplyr::left_join(ml_series, by = "period") %>%
     dplyr::mutate(gap = ra_ml - ra_fund, ml_benchmark = ml_col) %>%
     dplyr::filter(!is.na(gap))
 }
@@ -737,6 +1071,26 @@ build_dv <- function(fund_ret_mat, ml_ret_mat, ret_ym, factor_mat,
 # -----------------------------------------------------------------------------
 rolling_rho_machine <- function(fund_ra, ml_ra, window = ROLL_WINDOW,
                                 min_obs = 24L) {
+  if (!is.matrix(fund_ra) || !is.numeric(fund_ra) || ncol(fund_ra) == 0L ||
+      length(ml_ra) != nrow(fund_ra)) {
+    rlang::abort("fund_ra must be a non-empty numeric matrix and ml_ra must match its rows.")
+  }
+  if (length(window) != 1L || !is.finite(window) || window < 1L ||
+      window != as.integer(window) || nrow(fund_ra) <= window) {
+    rlang::abort("window must be a positive integer shorter than the residual series.")
+  }
+  if (length(min_obs) != 1L || !is.finite(min_obs) || min_obs < 2L ||
+      min_obs != as.integer(min_obs) || min_obs > window) {
+    rlang::abort("min_obs must be an integer between 2 and window.")
+  }
+  if (is.null(colnames(fund_ra)) || anyNA(colnames(fund_ra)) ||
+      any(!nzchar(colnames(fund_ra))) || anyDuplicated(colnames(fund_ra))) {
+    rlang::abort("fund_ra must have non-missing, unique column names.")
+  }
+  if (any(!is.finite(fund_ra) & !is.na(fund_ra)) ||
+      any(!is.finite(ml_ra) & !is.na(ml_ra))) {
+    rlang::abort("Residual inputs may contain missing values but not infinite values.")
+  }
   n_per <- nrow(fund_ra)
   out   <- matrix(NA_real_, n_per, ncol(fund_ra),
                   dimnames = list(NULL, colnames(fund_ra)))
@@ -772,6 +1126,7 @@ build_gap_panel <- function(ml_index) {
   rlang::inform("Reconciling fund codes across panels ...")
   codes <- reconcile_codes(daily)
 
+  browser()
   static   <- build_static()
   gest_s   <- build_gestora_static(static)
   fund_tv  <- build_fund_timevarying(daily, ml_index, codes)
@@ -783,7 +1138,8 @@ build_gap_panel <- function(ml_index) {
     dplyr::left_join(static, by = "code") %>%
     dplyr::left_join(gest_s, by = "gestora") %>%
     dplyr::left_join(dplyr::select(gest_tv, gestora, period,
-                                   pl_gestora, log_pl_gestora, n_funds_reporting),
+                                   pl_gestora, log_pl_gestora, gestora_net_flow,
+                                   n_funds_reporting),
                      by = c("gestora", "period")) %>%
     dplyr::left_join(conc, by = c("code", "period")) %>%
     dplyr::mutate(
@@ -819,6 +1175,9 @@ assert_panel <- function(panel) {
   invisible(TRUE)
 }
 
-# res <- build_gap_panel(ml_index)
+if (isTRUE(getOption("gap_panel.run", TRUE))) {
+  ml_index <- read_ml_index()
+  res <- build_gap_panel(ml_index)
+}
 # qs::qsave(res$panel,    file.path(OUT, "gap_panel.qs"))
 # qs::qsave(res$industry, file.path(OUT, "industry_panel.qs"))
