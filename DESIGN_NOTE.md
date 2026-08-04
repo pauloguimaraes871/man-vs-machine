@@ -251,6 +251,12 @@ identified and are robust to arbitrary common shocks.
   at that opening date; current-window flows are outcomes and only lagged flow measures
   enter as predictors. A month-end holdings snapshot is attached to the first complete
   15th-to-15th return window beginning after the snapshot is available.
+- **Partial holdings and shorts.** Top-X fields can contain signed positions. Their
+  squared-weight concentration statistic remains descriptive, but NAV-based residual
+  weight, minimum-position, and effective-bets bounds are undefined for a short book
+  or materially levered positive exposure and are recorded as missing. Source snapshots
+  with impossible absolute weights above 1,000% or broken rank ordering are excluded
+  from concentration measures with a warning, never imputed as zero.
 - **Persistence trap.** Market P/E and dividend yield are highly persistent; regressing
   on them over ~102 months invites Stambaugh bias and the Ferson–Sarkissian–Simin
   critique. **Drop them as primary state variables.** Keep P/E, DY, market volatility

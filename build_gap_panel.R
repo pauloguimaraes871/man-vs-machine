@@ -548,11 +548,11 @@ build_gestora_timevarying <- function(fund_tv, static_df) {
 # DESIGN_NOTE.md S4.1.
 #
 # WHAT IS SAFE TO COMPUTE
-#   w_cum_k      cumulative weight of the k largest positions
-#   hhi_top15    sum of squared top-15 NAV weights; a lower bound on true HHI
-#                for a net-long, NAV-normalised book
-#   resid_weight 100 - w_cum_15 = weight held outside the top 15, only when
-#                cumulative top-15 weight does not materially exceed NAV
+#   w_cum_k      net cumulative weight of the k largest positions
+#   hhi_top15    sum of squared signed top-15 NAV weights; a lower bound on
+#                the partial-portfolio HHI even when the fund has shorts
+#   resid_weight 100 - long_exposure_top15, only for a non-short,
+#                NAV-normalised book
 #   n_pos_min    HARD lower bound on the number of positions, no distributional
 #                assumption: every unseen position is at most w_(15), so
 #                  n_pos_min = 15 + ceiling(resid_weight / w_15)
@@ -587,6 +587,10 @@ build_gestora_timevarying <- function(fund_tv, static_df) {
 TOPX_MAX <- 15L
 TOPX_NAV_TOLERANCE_PCT <- 2
 TOPX_SOFT_CUM_WEIGHT_PCT <- 110
+# Gross exposure can exceed NAV for levered portfolios, but a four-digit
+# single-position percentage is not a credible holdings weight. It indicates
+# a corrupted source cell, not leverage.
+TOPX_MAX_ABS_WEIGHT_PCT <- 1000
 
 PT_MONTHS <- c(Jan = 1, Fev = 2, Mar = 3, Abr = 4,  Mai = 5,  Jun = 6,
                Jul = 7, Ago = 8, Set = 9, Out = 10, Nov = 11, Dez = 12)
@@ -609,6 +613,36 @@ parse_pt_month <- function(x) {              # "Nov-2015" -> 2015-11-01
   as.Date(sprintf("%s-%02d-01", yr, m))
 }
 
+# Economatica repeats S0001198076 in ranks 2--15 of the current extract, but
+# both copies are entirely blank. Retain a single populated copy if there is
+# one; fail on two populated copies because choosing one would corrupt the
+# fund-to-holdings alignment.
+resolve_topx_duplicate_columns <- function(raw, codes, rank) {
+  if (ncol(raw) != length(codes) + 1L || anyNA(codes) || any(!nzchar(codes))) {
+    rlang::abort("Top-X workbook has malformed fund-code headers.")
+  }
+  duplicate_codes <- unique(codes[duplicated(codes)])
+  if (length(duplicate_codes) == 0L) {
+    return(list(raw = raw, codes = codes))
+  }
+
+  keep <- rep(TRUE, length(codes))
+  for (code in duplicate_codes) {
+    columns <- which(codes == code)
+    populated <- vapply(columns, function(i) any(!is.na(raw[[i + 1L]])), logical(1))
+    if (sum(populated) > 1L) {
+      rlang::abort(sprintf(
+        "top%d_w.xlsx has multiple populated columns for duplicated code %s.",
+        rank, code
+      ))
+    }
+    keep[columns] <- FALSE
+    if (sum(populated) == 1L) keep[columns[populated]] <- TRUE
+  }
+
+  list(raw = raw[, c(TRUE, keep), drop = FALSE], codes = codes[keep])
+}
+
 read_topx_rank <- function(k) {
   path   <- file.path(DATA, sprintf("top%d_w.xlsx", k))
   header <- readxl::read_excel(path, skip = 3, n_max = 0, .name_repair = "minimal")
@@ -616,8 +650,10 @@ read_topx_rank <- function(k) {
                                col_types = c("text", rep("numeric", ncol(header) - 1L)),
                                .name_repair = "minimal")
 
+  resolved <- resolve_topx_duplicate_columns(raw, extract_code(names(header)[-1]), k)
+  raw <- resolved$raw
   values <- as.matrix(raw[, -1, drop = FALSE])
-  colnames(values) <- extract_code(names(header)[-1])
+  colnames(values) <- resolved$codes
 
   tibble::as_tibble(values) %>%
     dplyr::mutate(month = parse_pt_month(raw[[1]])) %>%
@@ -638,7 +674,10 @@ read_topx_all <- function(max_rank = TOPX_MAX) {
 # 100%; the 2pp tolerance also absorbs rounded reported weights. Above that
 # tolerance, lower-bound position counts are not identified from these fields.
 validate_concentration_input <- function(topx_long,
-                                         soft_cum_weight = TOPX_SOFT_CUM_WEIGHT_PCT) {
+                                         soft_cum_weight = TOPX_SOFT_CUM_WEIGHT_PCT,
+                                         max_abs_weight = TOPX_MAX_ABS_WEIGHT_PCT,
+                                         invalid_snapshot = c("error", "exclude")) {
+  invalid_snapshot <- match.arg(invalid_snapshot)
   required <- c("code", "month", "rank", "w")
   if (!is.data.frame(topx_long) || !all(required %in% names(topx_long)) ||
       nrow(topx_long) == 0L) {
@@ -648,12 +687,16 @@ validate_concentration_input <- function(topx_long,
       anyNA(topx_long$month) || any(!is.finite(topx_long$rank)) ||
       any(!is.finite(topx_long$w)) || any(topx_long$rank < 1L) ||
       any(topx_long$rank > TOPX_MAX) || any(topx_long$rank != as.integer(topx_long$rank)) ||
-      any(topx_long$w < 0) || anyDuplicated(topx_long[c("code", "month", "rank")])) {
-    rlang::abort("Top-X holdings must have unique code-month-rank keys, ranks 1..TOPX_MAX, and finite non-negative weights.")
+      anyDuplicated(topx_long[c("code", "month", "rank")])) {
+    rlang::abort("Top-X holdings must have unique code-month-rank keys, ranks 1..TOPX_MAX, and finite weights.")
   }
   if (length(soft_cum_weight) != 1L || !is.finite(soft_cum_weight) ||
       soft_cum_weight <= 100) {
     rlang::abort("soft_cum_weight must be a finite percentage above 100.")
+  }
+  if (length(max_abs_weight) != 1L || !is.finite(max_abs_weight) ||
+      max_abs_weight <= 100) {
+    rlang::abort("max_abs_weight must be a finite percentage above 100.")
   }
 
   diagnostics <- topx_long %>%
@@ -662,17 +705,34 @@ validate_concentration_input <- function(topx_long,
     dplyr::summarise(
       ranks_contiguous = all(rank == seq_len(dplyr::n())),
       weights_descend  = all(diff(w) <= 1e-8),
-      w_cum_15         = sum(w),
+      long_exposure    = sum(pmax(w, 0)),
       .groups = "drop"
     )
-  if (any(!diagnostics$ranks_contiguous | !diagnostics$weights_descend)) {
-    rlang::abort("Top-X ranks must be contiguous from 1 and weights must be non-increasing within each fund-month.")
+
+  extreme_keys <- topx_long %>%
+    dplyr::filter(abs(w) > max_abs_weight) %>%
+    dplyr::distinct(code, month)
+  malformed_keys <- diagnostics %>%
+    dplyr::filter(!ranks_contiguous | !weights_descend) %>%
+    dplyr::select(code, month)
+  invalid_keys <- dplyr::bind_rows(extreme_keys, malformed_keys) %>%
+    dplyr::distinct(code, month)
+
+  if (nrow(invalid_keys) > 0L) {
+    message <- sprintf(
+      "%d top-X fund-month snapshot(s) are malformed (%d with |weight| above %.0f%%; %d with invalid rank/order).",
+      nrow(invalid_keys), nrow(extreme_keys), max_abs_weight, nrow(malformed_keys)
+    )
+    if (identical(invalid_snapshot, "error")) rlang::abort(message)
+    rlang::warn(paste(message, "Excluding their concentration measures."))
+    topx_long <- dplyr::anti_join(topx_long, invalid_keys, by = c("code", "month"))
+    diagnostics <- dplyr::anti_join(diagnostics, invalid_keys, by = c("code", "month"))
   }
 
-  high_weight <- dplyr::filter(diagnostics, w_cum_15 > soft_cum_weight)
+  high_weight <- dplyr::filter(diagnostics, long_exposure > soft_cum_weight)
   if (nrow(high_weight) > 0L) {
     rlang::warn(sprintf(
-      "%d fund-month(s) have cumulative top-%d weights above %.0f%% of NAV (first: %s, %s). Review leverage or source units.",
+      "%d fund-month(s) have positive top-%d exposure above %.0f%% of NAV (first: %s, %s). Review leverage or source units.",
       nrow(high_weight), TOPX_MAX, soft_cum_weight,
       high_weight$code[1L], as.character(high_weight$month[1L])
     ))
@@ -687,8 +747,12 @@ fit_decay_slope <- function(rank, w) {
   unname(stats::coef(stats::lm(log(w[ok]) ~ log(rank[ok])))[2])
 }
 
-summarise_concentration <- function(topx_long) {
-  topx_long <- validate_concentration_input(topx_long)
+summarise_concentration <- function(topx_long,
+                                    invalid_snapshot = c("error", "exclude")) {
+  topx_long <- validate_concentration_input(
+    topx_long,
+    invalid_snapshot = match.arg(invalid_snapshot)
+  )
 
   topx_long %>%
     dplyr::arrange(code, month, rank) %>%
@@ -699,6 +763,9 @@ summarise_concentration <- function(topx_long) {
       w_top5      = sum(w[rank <= 5]),
       w_top10     = sum(w[rank <= 10]),
       w_cum_15    = sum(w),
+      long_exposure_top15  = sum(pmax(w, 0)),
+      gross_exposure_top15 = sum(abs(w)),
+      has_short   = any(w < 0),
       w_last      = w[which.max(rank)],
       hhi_top15   = sum((w / 100)^2),                 # LOWER bound on true HHI
       decay_slope = fit_decay_slope(rank, w),
@@ -708,20 +775,20 @@ summarise_concentration <- function(topx_long) {
       # A residual-weight / minimum-position bound assumes net long weights
       # measured against NAV. Preserve the inference under minor rounding, but
       # leave it unavailable when gross top-15 exposure materially exceeds NAV.
-      weight_over_nav = w_cum_15 > 100 + TOPX_NAV_TOLERANCE_PCT,
+      weight_over_nav = long_exposure_top15 > 100 + TOPX_NAV_TOLERANCE_PCT,
       resid_weight = dplyr::if_else(
-        weight_over_nav, NA_real_, pmax(100 - w_cum_15, 0)
+        weight_over_nav | has_short, NA_real_, pmax(100 - long_exposure_top15, 0)
       ),
       # Hard lower bound, no distributional assumption: every unseen position
       # is at most as large as the smallest observed one. Not identified for a
       # materially levered (top-15 > NAV) book.
       n_pos_min = dplyr::if_else(
-        !weight_over_nav & is.finite(w_last) & w_last > 0,
+        !weight_over_nav & !has_short & is.finite(w_last) & w_last > 0,
         n_ranks + ceiling(resid_weight / w_last),
         NA_real_
       ),
       eff_bets_max = dplyr::if_else(
-        !weight_over_nav & hhi_top15 > 0, 1 / hhi_top15, NA_real_
+        !weight_over_nav & !has_short & hhi_top15 > 0, 1 / hhi_top15, NA_real_
       )
     )
 }
@@ -732,7 +799,8 @@ summarise_concentration <- function(topx_long) {
 # snapshot maps to the return labelled 15 January, not 15 December: the latter
 # window began on 15 November and would partially precede the snapshot.
 build_concentration_panel <- function(ml_index, max_rank = TOPX_MAX) {
-  conc <- read_topx_all(max_rank) %>% summarise_concentration()
+  conc <- read_topx_all(max_rank) %>%
+    summarise_concentration(invalid_snapshot = "exclude")
 
   window_for_month <- tibble::tibble(period = ml_index) %>%
     dplyr::mutate(month_key = as.Date(format(period, "%Y-%m-01")))

@@ -36,10 +36,16 @@ suite aimed at alignment and leakage failures.
 
 - Month-end holdings snapshots map to the first complete future
   15th-to-15th return window, avoiding partial-window look-ahead.
-- Top-X holdings inputs validate ranks, non-negative weights, and descending
-  order. Top-15 cumulative weights up to 102% are tolerated; values above
-  110% issue a warning rather than ruling out leverage. Derived residual and
-  effective-bets quantities are withheld when NAV-normalised assumptions fail.
+- Top-X holdings inputs validate ranks and descending order while retaining
+  signed weights as possible short positions. Duplicate headers are accepted
+  only when at most one duplicate column contains data; the current repeated
+  `S0001198076` columns are blank and are dropped.
+- Top-15 positive exposure above 110% issues a warning rather than ruling out
+  leverage. NAV-based residual, minimum-position, and effective-bets bounds
+  are withheld for short books or positive exposure above 102%.
+- The current source has 18 malformed fund-month snapshots (absurd absolute
+  weights above 1,000% or broken rank ordering). They are explicitly excluded
+  from concentration measures with a warning, never converted to zero.
 
 ### Fund identity and classification
 
@@ -78,7 +84,7 @@ The test suite is in `tests/testthat/` and covers:
 - stale AUM rejection and missing-flow preservation;
 - all-missing manager aggregation;
 - transitive duplicate clusters while retaining legal fund identities;
-- malformed and levered concentration inputs;
+- duplicate headers, short books, malformed, and levered concentration inputs;
 - 36-month rolling-factor eligibility and factor alignment;
 - ML endpoint validation.
 

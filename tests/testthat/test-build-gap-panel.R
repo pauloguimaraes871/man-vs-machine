@@ -117,12 +117,33 @@ testthat::test_that("duplicate clusters are transitive but retain every legal fu
   testthat::expect_identical(clusters$code, colnames(returns))
 })
 
-testthat::test_that("concentration validation rejects malformed ranks and preserves leverage diagnostics", {
+testthat::test_that("top-X duplicate headers retain only an unambiguous populated column", {
+  blank <- tibble::tibble(month = as.Date("2020-01-01"), left = NA_real_, right = NA_real_)
+  resolved_blank <- resolve_topx_duplicate_columns(blank, c("A", "A"), rank = 2L)
+  testthat::expect_identical(resolved_blank$codes, character())
+
+  one_populated <- tibble::tibble(
+    month = as.Date("2020-01-01"), left = NA_real_, right = 15
+  )
+  resolved_one <- resolve_topx_duplicate_columns(one_populated, c("A", "A"), rank = 2L)
+  testthat::expect_identical(resolved_one$codes, "A")
+  testthat::expect_equal(resolved_one$raw[[2L]], 15)
+
+  two_populated <- tibble::tibble(
+    month = as.Date("2020-01-01"), left = 10, right = 15
+  )
+  testthat::expect_error(
+    resolve_topx_duplicate_columns(two_populated, c("A", "A"), rank = 2L),
+    "multiple populated columns"
+  )
+})
+
+testthat::test_that("concentration validation handles leverage, shorts, and corrupted snapshots", {
   bad_order <- tibble::tibble(
     code = rep("A", 3L), month = rep(as.Date("2020-01-01"), 3L),
     rank = 1:3, w = c(40, 45, 15)
   )
-  testthat::expect_error(summarise_concentration(bad_order), "non-increasing")
+  testthat::expect_error(summarise_concentration(bad_order), "malformed")
 
   levered <- tibble::tibble(
     code = rep("A", 3L), month = rep(as.Date("2020-01-01"), 3L),
@@ -130,11 +151,32 @@ testthat::test_that("concentration validation rejects malformed ranks and preser
   )
   summary <- NULL
   testthat::expect_warning(
-    summary <- summarise_concentration(levered), "above 110% of NAV"
+    summary <- summarise_concentration(levered), "positive top-15 exposure above 110%"
   )
   testthat::expect_true(summary$weight_over_nav)
   testthat::expect_true(is.na(summary$resid_weight))
   testthat::expect_true(is.na(summary$n_pos_min))
+
+  short_book <- tibble::tibble(
+    code = rep("A", 3L), month = rep(as.Date("2020-01-01"), 3L),
+    rank = 1:3, w = c(60, 20, -5)
+  )
+  short_summary <- summarise_concentration(short_book)
+  testthat::expect_true(short_summary$has_short)
+  testthat::expect_equal(short_summary$gross_exposure_top15, 85)
+  testthat::expect_true(is.na(short_summary$resid_weight))
+  testthat::expect_true(is.na(short_summary$eff_bets_max))
+
+  corrupted <- tibble::tibble(
+    code = rep("A", 3L), month = rep(as.Date("2020-01-01"), 3L),
+    rank = 1:3, w = c(1001, 5, 1)
+  )
+  testthat::expect_error(summarise_concentration(corrupted), "malformed")
+  testthat::expect_warning(
+    excluded <- summarise_concentration(corrupted, invalid_snapshot = "exclude"),
+    "Excluding their concentration measures"
+  )
+  testthat::expect_equal(nrow(excluded), 0L)
 })
 
 testthat::test_that("rolling gaps retain only dates with a full trailing 36-month fit", {
