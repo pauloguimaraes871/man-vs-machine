@@ -45,7 +45,37 @@ OUT  <- here::here("data", "derived")
 dir.create(OUT, showWarnings = FALSE, recursive = TRUE)
 
 ROLL_WINDOW <- 36L   # matches min_fund_months (plots.R:170)
-MAX_LEVEL_AGE_DAYS <- 7L
+MAX_LEVEL_AGE_DAYS <- 15L
+
+# Benchmark scheme for the DV. One of ML_SCHEMES, or "average" to equal-weight
+# all eight construction schemes. "average" is the safer headline: it cannot be
+# read as an optimiser chosen after seeing the results, and it matches the claim
+# the paper actually wants to make -- about systematic investing, not about one
+# optimiser. Run mvo_box (and the rest) as the H7 complexity/construction ladder.
+ML_BENCHMARK_DEFAULT <- "average"
+
+# ---- Data screens ----------------------------------------------------------
+# Each constant below exists because the unscreened build produced values that
+# are impossible rather than merely extreme. Counts are from the 2026-08-04 run
+# and are reported by `screen_report()` on every build so drift is visible.
+
+# flow_rate = net_flow / lag(aum) exploded to 3.4e10 because 414 fund-periods
+# had lagged AUM below R$1k and 16 had exactly zero. A shell fund's flow is not
+# economically comparable to a real one's, so below the floor the RATE is NA
+# (the level, net_flow, is untouched).
+MIN_AUM_FOR_FLOW  <- 100      # R$ thousands
+FLOW_RATE_CAP     <- 5        # +/- 500% per window; 50 obs exceeded |10|
+
+# Brazilian equity funds do not charge 750% p.a. Median is 1.5. Values above
+# the cap are a units/entry error, not a fee, so they become NA rather than
+# being winsorised into a plausible-looking number.
+MAX_EXPENSE_RATIO <- 10       # percent p.a.
+
+# HHI <= 1 by construction for a book whose weights sum to <= 100%. 21,040
+# fund-periods breached it, far more than the 18 malformed snapshots already
+# excluded, because leveraged/short books were never gated. hhi_top15 and
+# eff_bets_max now take the same NAV gate as resid_weight and n_pos_min.
+# (Gate value is TOPX_NAV_TOLERANCE_PCT, defined with the other topX constants.)
 
 
 # =============================================================================
@@ -261,7 +291,13 @@ build_static <- function() {
       leveraged       = leveraged     %in% c("S", "Sim"),
       investor_type   = investor_type,                # Geral|Qualificado|Profissional
       redemption_days = parse_redemption(redemption),
-      expense_ratio   = suppressWarnings(as.numeric(taxa_adm)),
+      # SCREEN 2: 306 funds report a "fee" above 10% p.a., topping out at 750.
+      # That is a units or data-entry fault, not a fee schedule, so it becomes
+      # NA. Winsorising instead would silently invent a plausible number.
+      expense_ratio   = {
+        v <- suppressWarnings(as.numeric(taxa_adm))
+        dplyr::if_else(!is.na(v) & v >= 0 & v <= MAX_EXPENSE_RATIO, v, NA_real_)
+      },
       inception       = parse_excel_date(inception),
 
       # Feeder / mirror is DIRECTLY observed -- no name heuristic.
@@ -272,9 +308,10 @@ build_static <- function() {
       # benchmark rests on a very thin cross-section -- report N or drop it.
       is_fof = fundo_cotas == "Sim" & multigestor == "Multigestor",
 
-      # Administradora matters as much as gestora: the administrator is the
-      # distribution channel, which is what the captive-flow argument is about.
-      bank_affiliated = grepl(BANK_PATTERN, paste(gestora, administradora),
+      # Bank affiliation is an asset-manager characteristic. Administrators
+      # are excluded: custody/administration does not identify the manager's
+      # investment process or captive-management-company channel.
+      bank_affiliated = grepl(BANK_PATTERN, paste(gestora),
                               ignore.case = TRUE),
 
       # Diagnostic only (DESIGN_NOTE.md S9). A keyword flag is deliberately
@@ -495,6 +532,7 @@ sum_or_zero <- function(x) {
 }
 
 build_fund_timevarying <- function(daily, ml_index, codes) {
+ 
   openings <- window_openings(ml_index)
 
   levels_long <- list(aum = "aum", n_investors = "n_investors") %>%
@@ -511,12 +549,18 @@ build_fund_timevarying <- function(daily, ml_index, codes) {
     dplyr::mutate(
       # AUM is already the period-opening value, so it is the economically
       # correct denominator for the current window's flow rate.
-      flow_rate     = net_flow / aum,
+      # SCREEN 1: a shell fund's flow rate is not comparable to a real fund's.
+      # Below the AUM floor the RATE is undefined; the LEVEL (net_flow) stays.
+      flow_rate     = dplyr::if_else(aum >= MIN_AUM_FOR_FLOW,
+                                     net_flow / aum, NA_real_),
+      flow_rate     = pmin(pmax(flow_rate, -FLOW_RATE_CAP), FLOW_RATE_CAP),
       flow_rate_lag = dplyr::lag(flow_rate),          # the usable predictor
       flow_vol_12   = zoo::rollapplyr(flow_rate_lag, 12, stats::sd,
                                        fill = NA, na.rm = TRUE),
-      log_pl_fundo  = log(pmax(aum, 1e-8)),
-      log_investors = log(pmax(n_investors, 1))
+      # log() of a zero-AUM fund is not -18.42, it is undefined. The old pmax
+      # floor manufactured a hard outlier at every dormant fund-period.
+      log_pl_fundo  = dplyr::if_else(aum > 0, log(aum), NA_real_),
+      log_investors = dplyr::if_else(n_investors > 0, log(n_investors), NA_real_)
     ) %>%
     dplyr::ungroup()
 }
@@ -532,7 +576,9 @@ build_gestora_timevarying <- function(fund_tv, static_df) {
       n_funds_reporting = sum(!is.na(aum)),
       .groups = "drop"
     ) %>%
-    dplyr::mutate(log_pl_gestora = log(pmax(pl_gestora, 1e-8)))
+    dplyr::mutate(
+      log_pl_gestora = dplyr::if_else(pl_gestora > 0, log(pl_gestora), NA_real_)
+    )
 }
 
 
@@ -557,9 +603,11 @@ build_gestora_timevarying <- function(fund_tv, static_df) {
 #                assumption: every unseen position is at most w_(15), so
 #                  n_pos_min = 15 + ceiling(resid_weight / w_15)
 #                This is the referee-proof breadth measure. Prefer it.
-#   decay_slope  OLS slope of log w_(k) on log k -- the shape of the weight
-#                curve. Steep = concentrated stock picker, flat = diversified
-#                systematic. This is the DISCRIMINATOR (see below).
+#   decay_slope  OLS slope beta in log w_(k) = a + beta log(k): a descriptive
+#                power-law shape of the positive top-15 weights. More-negative
+#                beta means weight declines faster with rank (more top-heavy);
+#                beta near zero is flatter. It is not turnover, a raw adjacent
+#                weight-change ratio, or a definitive quant classifier.
 #
 # WHAT IS **NOT** RECOVERABLE: TURNOVER.
 #   Changes in w_(k) over time are dominated by price drift, not trading: a top
@@ -575,17 +623,35 @@ build_gestora_timevarying <- function(fund_tv, static_df) {
 #   closer to strategy stability than to turnover, and it is not mechanically
 #   tied to performance.
 #
-# WHY decay_slope IS THE CLASSIFIER WE COULD NOT BUILD BEFORE
-#   Abis: quantitative funds hold ~225 names, discretionary ~117. A systematic
-#   book has a flat, long weight curve; a discretionary book is steep and short.
-#   Unlike the rejected designs in DESIGN_NOTE.md S9, this is observable,
-#   holdings-based, and INDEPENDENT of the ML portfolios -- so it carries none
-#   of the circularity that killed "closeness to ML" as a classifier.
-#   Control for ANBIMA class and fund size: sectorial mandates are concentrated
-#   by design, and large funds cannot concentrate in small caps.
+# INTERPRETATION OF decay_slope
+#   Under an exact power law, w_b / w_a = (b / a)^beta; it is therefore an
+#   elasticity across ranks, not a single adjacent-rank ratio. It is useful as
+#   a descriptive mediator/proxy for the shape of the long side of a portfolio.
+#   Any association with systematic management is an empirical hypothesis, not
+#   a classification rule; control for mandate and fund size in that analysis.
 
 TOPX_MAX <- 15L
 TOPX_NAV_TOLERANCE_PCT <- 2
+
+# Materiality floor for calling a negative weight a SHORT.
+#
+# Economatica's field is "Val Inv (det atv)" -- an asset detail line, not a
+# position book. Treating every negative entry as a short flagged 62.2% of all
+# fund-periods, including 986 funds whose cadastral `Alavancado` flag is "N" and
+# 3,992 fund-months of `Acoes Indexados` (index funds do not short). The median
+# flagged weight is -0.27% and the 75th percentile is -0.15%: these are
+# bookkeeping lines (negative cash, margin, payables), not investment positions.
+#
+# Because has_short gates hhi_top15, resid_weight, n_pos_min and eff_bets_max,
+# the unfiltered flag was withholding most of the concentration data over
+# entries too small to move any of those bounds. Only negatives at or beyond
+# this threshold count as shorts; smaller ones are treated as immaterial.
+SHORT_MATERIALITY_PCT <- 1
+
+# Ceiling for the minimum-position bound. B3 lists a few hundred tradable names
+# and a Brazilian equity fund cannot hold more than the universe, so an implied
+# count above this is a division-by-a-rounding-error artefact, not a portfolio.
+MAX_PLAUSIBLE_POSITIONS <- 400
 TOPX_SOFT_CUM_WEIGHT_PCT <- 110
 # Gross exposure can exceed NAV for levered portfolios, but a four-digit
 # single-position percentage is not a credible holdings weight. It indicates
@@ -618,6 +684,7 @@ parse_pt_month <- function(x) {              # "Nov-2015" -> 2015-11-01
 # one; fail on two populated copies because choosing one would corrupt the
 # fund-to-holdings alignment.
 resolve_topx_duplicate_columns <- function(raw, codes, rank) {
+  browser()
   if (ncol(raw) != length(codes) + 1L || anyNA(codes) || any(!nzchar(codes))) {
     rlang::abort("Top-X workbook has malformed fund-code headers.")
   }
@@ -644,6 +711,7 @@ resolve_topx_duplicate_columns <- function(raw, codes, rank) {
 }
 
 read_topx_rank <- function(k) {
+  
   path   <- file.path(DATA, sprintf("top%d_w.xlsx", k))
   header <- readxl::read_excel(path, skip = 3, n_max = 0, .name_repair = "minimal")
   raw    <- readxl::read_excel(path, skip = 3, na = "-",
@@ -765,9 +833,17 @@ summarise_concentration <- function(topx_long,
       w_cum_15    = sum(w),
       long_exposure_top15  = sum(pmax(w, 0)),
       gross_exposure_top15 = sum(abs(w)),
-      has_short   = any(w < 0),
+      # Any negative line at all -- kept for diagnostics, NOT used as a gate.
+      has_negative_line = any(w < 0),
+      # A short big enough to matter. See SHORT_MATERIALITY_PCT.
+      has_short   = any(w <= -SHORT_MATERIALITY_PCT),
+      min_weight  = suppressWarnings(min(w)),
+      # Smallest POSITIVE observed weight. This, not the highest-ranked weight,
+      # is the correct denominator for the minimum-position bound: an immaterial
+      # negative bookkeeping line at the last rank would otherwise void it.
+      w_min_positive = suppressWarnings(min(w[w > 0])),
       w_last      = w[which.max(rank)],
-      hhi_top15   = sum((w / 100)^2),                 # LOWER bound on true HHI
+      hhi_raw     = sum((w / 100)^2),
       decay_slope = fit_decay_slope(rank, w),
       .groups = "drop"
     ) %>%
@@ -776,6 +852,13 @@ summarise_concentration <- function(topx_long,
       # measured against NAV. Preserve the inference under minor rounding, but
       # leave it unavailable when gross top-15 exposure materially exceeds NAV.
       weight_over_nav = long_exposure_top15 > 100 + TOPX_NAV_TOLERANCE_PCT,
+
+      # SCREEN 3: HHI <= 1 is an identity for a long book whose weights sum to
+      # at most NAV. Ungated, 21,040 fund-periods breached it -- levered and
+      # short books, far more than the malformed snapshots already excluded.
+      # Same NAV gate as resid_weight / n_pos_min so the three bounds agree on
+      # when they are identified.
+      hhi_top15 = dplyr::if_else(!weight_over_nav & !has_short, hhi_raw, NA_real_),
       resid_weight = dplyr::if_else(
         weight_over_nav | has_short, NA_real_, pmax(100 - long_exposure_top15, 0)
       ),
@@ -783,14 +866,23 @@ summarise_concentration <- function(topx_long,
       # is at most as large as the smallest observed one. Not identified for a
       # materially levered (top-15 > NAV) book.
       n_pos_min = dplyr::if_else(
-        !weight_over_nav & !has_short & is.finite(w_last) & w_last > 0,
-        n_ranks + ceiling(resid_weight / w_last),
+        !weight_over_nav & !has_short &
+          is.finite(w_min_positive) & w_min_positive > 0,
+        n_ranks + ceiling(resid_weight / w_min_positive),
         NA_real_
       ),
+      # The bound divides by the smallest observed positive weight, so a
+      # near-zero one sends it to absurdity: the raw series had a mean of 6.8e4
+      # against a median of 20. Beyond a plausible investable universe the bound
+      # is still technically valid but carries no information, so it is dropped
+      # rather than winsorised into a number someone might read as a holding count.
+      n_pos_min = dplyr::if_else(n_pos_min <= MAX_PLAUSIBLE_POSITIONS,
+                                 n_pos_min, NA_real_),
       eff_bets_max = dplyr::if_else(
-        !weight_over_nav & !has_short & hhi_top15 > 0, 1 / hhi_top15, NA_real_
+        !is.na(hhi_top15) & hhi_top15 > 0, 1 / hhi_top15, NA_real_
       )
-    )
+    ) %>%
+    dplyr::select(-hhi_raw)
 }
 
 # `period` labels the CLOSING 15th of a return window. A month-end holdings
@@ -847,6 +939,27 @@ build_concentration_panel <- function(ml_index, max_rank = TOPX_MAX) {
 # interest is the size of the industry, not of the estimation sample.
 
 build_industry_panel <- function(fund_tv) {
+  # SCREEN 4: coverage drift is not a detail here. Between 2015-12 and 2024-05
+  # `n_reporting` rose 605 -> 1,190 (+97%) while `industry_pl` rose +353%, so a
+  # large share of apparent industry growth is simply more funds being covered.
+  # The balanced series below holds the fund set fixed: only funds reporting AUM
+  # in EVERY period contribute, so its movements are size, not coverage. Use it
+  # for anything testing the Pastor-Stambaugh-Taylor industry-scale channel.
+  balanced_codes <- fund_tv %>%
+    dplyr::group_by(code) %>%
+    dplyr::summarise(n_obs = sum(!is.na(aum)), .groups = "drop") %>%
+    dplyr::filter(n_obs == dplyr::n_distinct(fund_tv$period)) %>%
+    dplyr::pull(code)
+
+  balanced <- fund_tv %>%
+    dplyr::filter(code %in% balanced_codes) %>%
+    dplyr::group_by(period) %>%
+    dplyr::summarise(
+      industry_pl_balanced = sum_or_zero(aum),
+      n_balanced           = dplyr::n(),
+      .groups = "drop"
+    )
+
   fund_tv %>%
     dplyr::group_by(period) %>%
     dplyr::summarise(
@@ -855,6 +968,7 @@ build_industry_panel <- function(fund_tv) {
       n_reporting       = sum(!is.na(aum)),
       .groups = "drop"
     ) %>%
+    dplyr::left_join(balanced, by = "period") %>%
     dplyr::arrange(period) %>%
     dplyr::mutate(
       # Counterfactual asset base with market appreciation stripped out.
@@ -864,10 +978,19 @@ build_industry_panel <- function(fund_tv) {
       # cleanest of the three for use as a regressor.
       industry_flow_rate = industry_net_flow / dplyr::lag(industry_pl),
 
-      # Description only -- return-contaminated, see (1) above.
+      # Coverage-neutral alternative: average fund size. Moves with the size of
+      # the typical fund rather than with how many funds Economatica covers.
+      industry_pl_per_fund = dplyr::if_else(n_reporting > 0,
+                                            industry_pl / n_reporting, NA_real_),
+
+      # Description only -- return-contaminated AND coverage-driven, see above.
       industry_pl_growth = industry_pl / dplyr::lag(industry_pl) - 1,
 
-      log_industry_pl = log(pmax(industry_pl, 1e-8))
+      log_industry_pl = dplyr::if_else(industry_pl > 0, log(industry_pl), NA_real_),
+      log_industry_pl_balanced = dplyr::if_else(
+        !is.na(industry_pl_balanced) & industry_pl_balanced > 0,
+        log(industry_pl_balanced), NA_real_
+      )
     )
 }
 
@@ -938,6 +1061,7 @@ FF_PREDICTORS <- c("mkt_e", "hml_n", "mom_n", "rmw_n", "smb_n", "cma_n")
 # Returns the design pieces as plain matrices: everything downstream is linear
 # algebra, and lm() per fund-period would be ~200k model-frame constructions.
 align_factors <- function(ret_ym, factor_mat) {
+  browser()
   required <- c("ym", "rf", FF_PREDICTORS)
   if (!is.data.frame(factor_mat) || !all(required %in% names(factor_mat))) {
     rlang::abort(sprintf("factor_mat must contain: %s.",
@@ -996,6 +1120,7 @@ align_factors <- function(ret_ym, factor_mat) {
 # -----------------------------------------------------------------------------
 rolling_risk_adjusted <- function(ret_mat, ret_ym, factor_mat,
                                   window = ROLL_WINDOW, min_obs = ROLL_WINDOW) {
+  browser()
   if (!is.matrix(ret_mat) || !is.numeric(ret_mat) || ncol(ret_mat) == 0L ||
       nrow(ret_mat) != length(ret_ym)) {
     rlang::abort("ret_mat must be a non-empty numeric matrix with one row per ret_ym period.")
@@ -1100,6 +1225,8 @@ build_dv <- function(fund_ret_mat, ml_ret_mat, period, factor_mat,
   if (!ml_col %in% colnames(ml_ret_mat)) {
     rlang::abort(sprintf("'%s' is not a column of ml_ret_mat.", ml_col))
   }
+  
+  browser()
 
   fund_ra <- rolling_risk_adjusted(fund_ret_mat, factor_ym, factor_mat, window, min_obs)
   ml_ra   <- rolling_risk_adjusted(ml_ret_mat[, ml_col, drop = FALSE],
@@ -1121,6 +1248,136 @@ build_dv <- function(fund_ret_mat, ml_ret_mat, period, factor_mat,
     dplyr::mutate(gap = ra_ml - ra_fund, ml_benchmark = ml_col) %>%
     dplyr::filter(!is.na(gap))
 }
+
+# -----------------------------------------------------------------------------
+# Inputs the DV needs, loaded standalone (plots.R is never sourced here).
+# Every definition below mirrors plots.R so the gap is measured against exactly
+# the factor basis and return convention used in the published tables.
+# -----------------------------------------------------------------------------
+
+SIGNAL_PORTS_FILE <- file.path(
+  DATA, "signal_ports", "gold_2024_05_comdinheiro_signal_port_backtest_cohorts.qs"
+)
+
+# Restore a serialised meta_xts whose index was stored numerically (plots.R:14).
+restore_xts_dates <- function(obj) {
+  idx <- zoo::index(obj@data)
+  if (inherits(idx, "Date")) return(obj)
+  if (!is.numeric(idx)) rlang::abort("meta_xts index is neither Date nor numeric.")
+  d <- as.Date(as.POSIXct(as.numeric(idx), origin = "1970-01-01", tz = "UTC"))
+  if (anyNA(d) || anyDuplicated(d) || is.unsorted(d, strictly = TRUE)) {
+    rlang::abort("meta_xts index could not be restored to unique sorted dates.")
+  }
+  obj@data <- xts::xts(zoo::coredata(obj@data), order.by = d)
+  obj
+}
+
+# Geometric compounding of daily percent returns over (previous 15th, 15th].
+# Identical convention to compound_daily_returns_15th() at plots.R:99.
+compound_daily_to_windows <- function(obj, period_ends, codes = colnames(obj$values)) {
+  period_ends <- validate_ml_index(period_ends)
+  openings    <- window_openings(period_ends)
+
+  out <- matrix(NA_real_, length(period_ends), length(codes),
+                dimnames = list(NULL, codes))
+  for (i in seq_along(period_ends)) {
+    sel <- obj$dates > openings[[i]] & obj$dates <= period_ends[[i]]
+    if (!any(sel)) {
+      rlang::abort(paste0("No daily rows in the window ending ", period_ends[[i]], "."))
+    }
+    block <- obj$values[sel, codes, drop = FALSE]
+    out[i, ] <- apply(block, 2L, function(x) {
+      x <- x[is.finite(x)]
+      if (!length(x)) return(NA_real_)
+      (prod(1 + x / 100) - 1) * 100
+    })
+  }
+  out
+}
+
+# The eight meta-portfolio construction schemes, in the order they appear in the
+# pinned backtest. `selected_bench_return` is the IBOV benchmark, not a scheme.
+ML_SCHEMES <- c("rp", "rp_box", "hrp", "cs", "sw", "ew", "mvo", "mvo_box")
+
+# Resolve a short scheme name ("mvo_box") or the literal "average" to a return
+# series. "average" equal-weights all eight construction schemes, which is the
+# right benchmark when the question is about systematic investing in general
+# rather than about one optimiser's quirks -- it also removes the reader's
+# suspicion that a single scheme was chosen after seeing the results.
+resolve_ml_benchmark <- function(ml_ret_mat, scheme) {
+  scheme_col <- function(s) {
+    hit <- grep(sprintf("^c__meta_%s_ibov_s__", s), colnames(ml_ret_mat), value = TRUE)
+    if (length(hit) != 1L) {
+      rlang::abort(sprintf("Scheme '%s' matched %d columns.", s, length(hit)))
+    }
+    hit
+  }
+
+  if (identical(scheme, "average")) {
+    cols <- vapply(ML_SCHEMES, scheme_col, character(1))
+    avg  <- rowMeans(ml_ret_mat[, cols, drop = FALSE], na.rm = TRUE)
+    out  <- cbind(ml_ret_mat, average = avg)
+    return(list(mat = out, col = "average"))
+  }
+
+  list(mat = ml_ret_mat, col = scheme_col(scheme))
+}
+
+# ML meta-portfolio net returns, on the same index as read_ml_index().
+read_ml_returns <- function(path = ML_BACKTEST_FILE) {
+  cohort <- qs::qread(path)$backtest_meta_portfolios_results$ibov_port_backtest_cohort
+  obj    <- restore_xts_dates(cohort@port_returns_m_xts_list$net_returns_m_xts)
+  m      <- as.matrix(zoo::coredata(obj@data))
+  rownames(m) <- format(as.Date(zoo::index(obj@data)))
+  m
+}
+
+# Six-factor basis exactly as plots.R:1009 builds it: MKT as benchmark excess
+# over CDI, every style factor market-neutralised so long-only portfolios do not
+# collapse into collinearity.
+build_factor_mat <- function(period_ends, cdi_daily) {
+  sp <- restore_xts_dates(
+    qs::qread(SIGNAL_PORTS_FILE)$signal_port_backtest_cohort_ind_signals@
+      port_returns_m_xts_list$net_returns_m_xts
+  )
+  sp_xts <- sp@data
+  sp_ym  <- format(as.Date(zoo::index(sp_xts)), "%Y-%m")
+
+  fcol <- function(sig) {
+    hit <- grep(paste0("^c__cs_", sig, "_(long|short)_s__"),
+                colnames(sp_xts), value = TRUE)
+    if (length(hit) != 1L) {
+      rlang::abort(sprintf("Signal '%s' matched %d columns, expected 1.", sig, length(hit)))
+    }
+    hit
+  }
+
+  rf <- as.numeric(compound_daily_to_windows(cdi_daily, period_ends,
+                                             codes = colnames(cdi_daily$values)[1])[, 1])
+
+  tibble::tibble(
+    ym  = sp_ym,
+    mkt = as.numeric(sp_xts[, "selected_bench_return"]),
+    hml = as.numeric(sp_xts[, fcol("be_me")]),
+    mom = as.numeric(sp_xts[, fcol("prc_ret_12m_1m")]),
+    rmw = as.numeric(sp_xts[, fcol("gp_at_12m")]),
+    smb = as.numeric(sp_xts[, fcol("log_mkt_cap")]),
+    cma = as.numeric(sp_xts[, fcol("assets_gr1y_tr")])
+  ) %>%
+    dplyr::left_join(tibble::tibble(ym = format(period_ends, "%Y-%m"), rf = rf),
+                     by = "ym") %>%
+    dplyr::transmute(
+      ym, rf,
+      mkt_e = mkt - rf,
+      hml_n = hml - mkt,
+      mom_n = mom - mkt,
+      rmw_n = rmw - mkt,
+      smb_n = smb - mkt,
+      cma_n = cma - mkt
+    ) %>%
+    dplyr::arrange(ym)
+}
+
 
 # -----------------------------------------------------------------------------
 # rolling_rho_machine()
@@ -1187,14 +1444,16 @@ rolling_rho_machine <- function(fund_ra, ml_ra, window = ROLL_WINDOW,
 # =============================================================================
 # S9. Assembly
 # =============================================================================
-build_gap_panel <- function(ml_index) {
+build_gap_panel <- function(ml_index, ml_benchmark = ML_BENCHMARK_DEFAULT,
+                            screen_duplicates = TRUE) {
+  
+  browser()
   rlang::inform("Reading Economatica daily panels ...")
   daily <- read_all_daily()
 
   rlang::inform("Reconciling fund codes across panels ...")
   codes <- reconcile_codes(daily)
 
-  browser()
   static   <- build_static()
   gest_s   <- build_gestora_static(static)
   fund_tv  <- build_fund_timevarying(daily, ml_index, codes)
@@ -1202,7 +1461,27 @@ build_gap_panel <- function(ml_index) {
   industry <- build_industry_panel(fund_tv)
   conc     <- build_concentration_panel(ml_index)
 
+  rlang::inform("Building the dependent variable ...")
+  dv <- build_gap_dv(daily, ml_index, codes, ml_benchmark)
+
+  # Same-master feeders produce near-identical return series that look like
+  # independent funds, inflating the cross-section and understating standard
+  # errors. The cluster id and representative flag are ATTACHED, never filtered:
+  # every legal vehicle must stay in the panel for AUM and flow aggregation, but
+  # any strategy-level regression should restrict to `is_representative`.
+  dup <- if (isTRUE(screen_duplicates)) {
+    rlang::inform("Screening duplicate strategies ...")
+    fund_m <- compound_daily_to_windows(daily$ret, ml_index, codes)
+    obs_n  <- colSums(!is.na(fund_m))
+    find_duplicate_clusters(fund_m) %>%
+      pick_cluster_representative(static, obs_n)
+  } else {
+    tibble::tibble(code = codes, dup_cluster = codes, is_representative = TRUE)
+  }
+
   panel <- fund_tv %>%
+    dplyr::left_join(dv$gap, by = c("code", "period")) %>%
+    dplyr::left_join(dup, by = "code") %>%
     dplyr::left_join(static, by = "code") %>%
     dplyr::left_join(gest_s, by = "gestora") %>%
     dplyr::left_join(dplyr::select(gest_tv, gestora, period,
@@ -1219,7 +1498,48 @@ build_gap_panel <- function(ml_index) {
     )
 
   assert_panel(panel)
-  list(panel = panel, industry = industry, static = static)
+  list(panel = panel, industry = industry, static = static,
+       ml_benchmark = dv$ml_benchmark, factor_mat = dv$factor_mat)
+}
+
+# Assemble the DV: compound fund and ML returns onto the 15th-to-15th index,
+# build the factor basis, then difference the realised risk-adjusted returns.
+# `rho_machine` comes free once both residual series exist.
+build_gap_dv <- function(daily, ml_index, codes,
+                         ml_benchmark = ML_BENCHMARK_DEFAULT) {
+  
+  browser()
+  cdi_daily <- read_economatica_daily("CDI_diarios.xlsx")
+
+  fund_m <- compound_daily_to_windows(daily$ret, ml_index, codes)
+  ml_raw <- read_ml_returns()
+
+  if (!identical(rownames(ml_raw), format(ml_index))) {
+    rlang::abort("ML return index does not match the validated ml_index.")
+  }
+
+  resolved     <- resolve_ml_benchmark(ml_raw, ml_benchmark)
+  ml_m         <- resolved$mat
+  ml_benchmark <- resolved$col
+  rlang::inform(sprintf("  ML benchmark column: '%s'.", ml_benchmark))
+
+  factor_mat <- build_factor_mat(ml_index, cdi_daily)
+
+  gap <- build_dv(fund_m, ml_m, ml_index, factor_mat, ml_col = ml_benchmark)
+
+  # Mediator, not a control (see the taxonomy at the top of this file).
+  fund_ra <- rolling_risk_adjusted(fund_m, format(ml_index, "%Y-%m"), factor_mat)
+  ml_ra   <- rolling_risk_adjusted(ml_m[, ml_benchmark, drop = FALSE],
+                                   format(ml_index, "%Y-%m"), factor_mat)
+  rho <- rolling_rho_machine(fund_ra$ra, as.numeric(ml_ra$ra[, 1L]))
+
+  gap <- gap %>%
+    dplyr::left_join(
+      matrix_to_long(rho, ml_index, "rho_machine"),
+      by = c("code", "period")
+    )
+
+  list(gap = gap, ml_benchmark = ml_benchmark, factor_mat = factor_mat)
 }
 
 assert_panel <- function(panel) {
@@ -1243,9 +1563,13 @@ assert_panel <- function(panel) {
   invisible(TRUE)
 }
 
+# The writes must stay INSIDE the guard. Tests source this file with
+# gap_panel.run = FALSE to load helpers without triggering the full build; with
+# the qsave() calls outside, `res` does not exist and the whole suite aborts
+# before the first test runs.
 if (isTRUE(getOption("gap_panel.run", TRUE))) {
   ml_index <- read_ml_index()
   res <- build_gap_panel(ml_index)
+  qs::qsave(res$panel,    file.path(OUT, "gap_panel.qs"))
+  qs::qsave(res$industry, file.path(OUT, "industry_panel.qs"))
 }
-# qs::qsave(res$panel,    file.path(OUT, "gap_panel.qs"))
-# qs::qsave(res$industry, file.path(OUT, "industry_panel.qs"))

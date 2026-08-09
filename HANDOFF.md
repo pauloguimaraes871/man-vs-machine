@@ -30,7 +30,7 @@ suite aimed at alignment and leakage failures.
   an all-missing manager-period aggregate is zero, as approved, while a
   fund-period flow with no information remains missing.
 - Daily level sampling rejects observations older than `MAX_LEVEL_AGE_DAYS =
-  7`, preventing stale AUM from silently entering the panel.
+  15`, preventing stale AUM from silently entering the panel.
 
 ### Holdings and concentration
 
@@ -58,6 +58,24 @@ suite aimed at alignment and leakage failures.
   validation set of 20 known quantitative/factor funds, keyed by ANBIMA code.
   These labels validate the broad name-based quant diagnostic; they are not a
   paper classifier or a headline estimand.
+- `bank_affiliated` is computed from `gestora` only. The administrator is a
+  service/custody role and is deliberately excluded from this manager-level
+  characteristic.
+- To inspect the logical quant flag, use `dplyr::filter(static, name_quant)`;
+  `isTRUE(name_quant)` is scalar and is false for a multi-row logical column.
+
+### Meaning of `decay_slope`
+
+- `decay_slope` is the OLS coefficient `beta` from
+  `log(w_k) = a + beta log(k)`, estimated from at least four positive ranked
+  weights. It describes the shape of the observed long-side weight curve.
+- It is an elasticity, not a simple ratio of changes in weights: under an exact
+  power-law curve, `w_b / w_a = (b / a)^beta`. A more-negative coefficient is
+  more top-heavy; a coefficient closer to zero is flatter.
+- It is a descriptive concentration mediator/proxy, not a turnover measure or
+  a stand-alone classifier of quantitative management. Its proposed relation
+  to systematic management must be tested while controlling for mandate and
+  fund size.
 
 ### Rolling return routines and production entry point
 
@@ -69,7 +87,8 @@ suite aimed at alignment and leakage failures.
   and validates consecutive calendar-15th endpoints before building the panel.
 - Tests set `options(gap_panel.run = FALSE)`, so sourcing helpers loads
   functions without triggering the 72 MB production build. A normal direct
-  `source("build_gap_panel.R")` still runs the build.
+  `source("build_gap_panel.R")` runs the build and writes the panel and
+  industry outputs as `.qs` files in `data/derived/`.
 - `methods::hasSlot()` was replaced because it is not exported. Slot presence
   now uses `methods::slotNames()` alongside `base::isS4()`.
 - Removed the obsolete `stop("RONALDO")` debugging stop.
@@ -101,7 +120,7 @@ source("build_gap_panel.R")
 
 1. Run the two R commands above in an interactive R session. The agent's
    headless R runner stalls while activating `renv`, before any tests begin.
-2. Review the panel output and decide whether to uncomment the two `qs::qsave`
-   lines at the end of `build_gap_panel.R` for durable derived-data output.
+2. Review the `.qs` outputs in `data/derived/` after a full build; they are
+   now written automatically.
 3. Keep `latex_paper/manuscript.pdf` and `provenance/` outside any follow-up
    panel commit unless the owner deliberately expands scope.
