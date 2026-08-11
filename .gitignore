@@ -47,6 +47,9 @@
 /figures/
 /tables/
 
+# Superseded/unused scripts
+/comdinheiro_fundscreener.R
+
 # Operating-system files
 .DS_Store
 Thumbs.db
