@@ -684,7 +684,7 @@ parse_pt_month <- function(x) {              # "Nov-2015" -> 2015-11-01
 # one; fail on two populated copies because choosing one would corrupt the
 # fund-to-holdings alignment.
 resolve_topx_duplicate_columns <- function(raw, codes, rank) {
-  browser()
+  
   if (ncol(raw) != length(codes) + 1L || anyNA(codes) || any(!nzchar(codes))) {
     rlang::abort("Top-X workbook has malformed fund-code headers.")
   }
@@ -1061,7 +1061,7 @@ FF_PREDICTORS <- c("mkt_e", "hml_n", "mom_n", "rmw_n", "smb_n", "cma_n")
 # Returns the design pieces as plain matrices: everything downstream is linear
 # algebra, and lm() per fund-period would be ~200k model-frame constructions.
 align_factors <- function(ret_ym, factor_mat) {
-  browser()
+  
   required <- c("ym", "rf", FF_PREDICTORS)
   if (!is.data.frame(factor_mat) || !all(required %in% names(factor_mat))) {
     rlang::abort(sprintf("factor_mat must contain: %s.",
@@ -1120,7 +1120,7 @@ align_factors <- function(ret_ym, factor_mat) {
 # -----------------------------------------------------------------------------
 rolling_risk_adjusted <- function(ret_mat, ret_ym, factor_mat,
                                   window = ROLL_WINDOW, min_obs = ROLL_WINDOW) {
-  browser()
+  
   if (!is.matrix(ret_mat) || !is.numeric(ret_mat) || ncol(ret_mat) == 0L ||
       nrow(ret_mat) != length(ret_ym)) {
     rlang::abort("ret_mat must be a non-empty numeric matrix with one row per ret_ym period.")
@@ -1226,7 +1226,7 @@ build_dv <- function(fund_ret_mat, ml_ret_mat, period, factor_mat,
     rlang::abort(sprintf("'%s' is not a column of ml_ret_mat.", ml_col))
   }
   
-  browser()
+  
 
   fund_ra <- rolling_risk_adjusted(fund_ret_mat, factor_ym, factor_mat, window, min_obs)
   ml_ra   <- rolling_risk_adjusted(ml_ret_mat[, ml_col, drop = FALSE],
@@ -1447,7 +1447,7 @@ rolling_rho_machine <- function(fund_ra, ml_ra, window = ROLL_WINDOW,
 build_gap_panel <- function(ml_index, ml_benchmark = ML_BENCHMARK_DEFAULT,
                             screen_duplicates = TRUE) {
   
-  browser()
+  
   rlang::inform("Reading Economatica daily panels ...")
   daily <- read_all_daily()
 
@@ -1508,7 +1508,7 @@ build_gap_panel <- function(ml_index, ml_benchmark = ML_BENCHMARK_DEFAULT,
 build_gap_dv <- function(daily, ml_index, codes,
                          ml_benchmark = ML_BENCHMARK_DEFAULT) {
   
-  browser()
+  
   cdi_daily <- read_economatica_daily("CDI_diarios.xlsx")
 
   fund_m <- compound_daily_to_windows(daily$ret, ml_index, codes)
