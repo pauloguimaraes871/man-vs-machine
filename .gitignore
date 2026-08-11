@@ -1,6 +1,9 @@
 # Raw and potentially confidential research data
 /data/
 
+# Pipeline manifest snapshots (large, and duplicate what the pipeline repo pins)
+/provenance/
+
 # R and RStudio user state
 /.Rproj.user/
 /.Rhistory
