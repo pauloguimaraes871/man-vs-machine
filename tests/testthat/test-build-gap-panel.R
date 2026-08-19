@@ -293,6 +293,18 @@ testthat::test_that("mandate assignment follows the declared ANBIMA class", {
   testthat::expect_true(all(assign_mandate(cls) %in% ML_MANDATES))
 })
 
+testthat::test_that("index-tracking classes stay on the ibov mandate", {
+  # Índice Ativo / Indexados are deliberately NOT a separate benchmark arm:
+  # they fall back to ibov like any other unlisted class, and their behavioural
+  # difference is handled by RHS dummies in analysis_gap.R. A separate mandate
+  # here would need a machine cohort that was never run.
+  testthat::expect_identical(
+    assign_mandate(c("Ações Índice Ativo", "Ações Indexados")),
+    c("ibov", "ibov")
+  )
+  testthat::expect_false(exists("assign_arm"))
+})
+
 testthat::test_that("the cadastral header row is detected, not assumed", {
   make_raw <- function(code_col) {
     raw <- as.data.frame(matrix("", nrow = length(code_col), ncol = 30L),

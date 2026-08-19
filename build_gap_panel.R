@@ -92,6 +92,13 @@ MANDATE_BY_ANBIMA_CLASS <- c(
 )
 MANDATE_FALLBACK <- "ibov"
 
+# "Ações Índice Ativo" and "Ações Indexados" deliberately fall back to ibov like
+# any other unlisted class: an index fund's opportunity set IS the broad index,
+# so the ibov machine is the mandate-appropriate benchmark and no separate
+# cohort is warranted. Their distinct BEHAVIOUR (index replication rather than
+# active stock-picking) is picked up in analysis_gap.R by class dummies on the
+# right-hand side, not by carving out a separate benchmark arm here.
+
 # ---- Data screens ----------------------------------------------------------
 # Each constant below exists because the unscreened build produced values that
 # are impossible rather than merely extreme. Counts are from the 2026-08-04 run
@@ -427,13 +434,30 @@ build_static <- function() {
       },
       inception       = parse_excel_date(inception),
 
-      # Feeder / mirror is DIRECTLY observed -- no name heuristic.
-      # Real counts: Feeder 573, Espelho 161, Multigestor 29, N/A 1001, "-" 180.
+      # Feeder / mirror as DECLARED by Economatica -- no name heuristic. Refined
+      # sample counts: Feeder 12, Espelho 2, Multigestor 2, "Não se Aplica" 613,
+      # "-" 74.
+      #
+      # This flag alone is NOT the exclusion rule. Post-CVM-175 the label also
+      # catches "Classe Única de Cotas do X" vehicles -- a SOLE share class,
+      # which is the fund itself rather than a feeder into a separate master
+      # that is also in the sample. 8 of the 14 flagged funds have no twin
+      # anywhere in the panel, so excluding on this flag alone deleted unique
+      # return series instead of de-duplicating. `is_redundant_feeder`, built in
+      # build_gap_panel() once duplicate clusters are known, is the rule that
+      # actually gates the sample.
       is_feeder = multigestor %in% c("Feeder", "Espelho"),
 
-      # Owner's rule. Caps out at 29 funds, so any "average human fund-of-funds"
-      # benchmark rests on a very thin cross-section -- report N or drop it.
-      is_fof = fundo_cotas == "Sim" & multigestor == "Multigestor",
+      # Multi-manager (fund-of-funds) vehicles are a different estimand: their
+      # return is an allocation across managers, not one manager's stock
+      # selection.
+      #
+      # The old rule also required `fundo_cotas == "Sim"`, but the refined
+      # export reports "Não" for ALL 703 funds, so the conjunction never fired
+      # and the screen was silently inert -- "Itaú Institucional Ações Fund Of
+      # Funds Multigestor X" was sitting in the main sample. The declared
+      # Multigestor label is the whole rule now (2 funds).
+      is_fof = multigestor == "Multigestor",
 
       # Bank affiliation is an asset-manager characteristic. Administrators
       # are excluded: custody/administration does not identify the manager's
@@ -991,7 +1015,11 @@ summarise_concentration <- function(topx_long,
       # Smallest POSITIVE observed weight. This, not the highest-ranked weight,
       # is the correct denominator for the minimum-position bound: an immaterial
       # negative bookkeeping line at the last rank would otherwise void it.
-      w_min_positive = suppressWarnings(min(w[w > 0])),
+      # NA (not Inf) when every top-15 line is <= 0: min() of an empty set.
+      w_min_positive = {
+        pos <- w[w > 0]
+        if (length(pos) == 0L) NA_real_ else min(pos)
+      },
       w_last      = w[which.max(rank)],
       hhi_raw     = sum((w / 100)^2),
       decay_slope = fit_decay_slope(rank, w),
@@ -1030,7 +1058,13 @@ summarise_concentration <- function(topx_long,
                                  n_pos_min, NA_real_),
       eff_bets_max = dplyr::if_else(
         !is.na(hhi_top15) & hhi_top15 > 0, 1 / hhi_top15, NA_real_
-      )
+      ),
+      # Same MAX_PLAUSIBLE_POSITIONS ceiling as n_pos_min, and for the same
+      # reason: 1/HHI over a near-zero top-15 HHI is technically valid but
+      # exceeds any credible Brazilian equity universe, so it carries no
+      # information rather than an implausibly large effective-bet count.
+      eff_bets_max = dplyr::if_else(eff_bets_max <= MAX_PLAUSIBLE_POSITIONS,
+                                    eff_bets_max, NA_real_)
     ) %>%
     dplyr::select(-hhi_raw)
 }
@@ -1349,7 +1383,12 @@ rolling_risk_adjusted <- function(ret_mat, ret_ym, factor_mat,
 # -----------------------------------------------------------------------------
 # build_dv()
 #
-#   gap(i,t) = ra_m(i)(t) - ra_i(t)
+#   gap(i,t)     = ra_m(i)(t) - ra_i(t)     six-factor risk-adjusted
+#   gap_raw(i,t) = r_m(i)(t)  - r_i(t)      plain return difference
+#
+# Both are emitted on the same rows. `gap` is the headline alpha gap; `gap_raw`
+# keeps the factor-exposure component that `gap` removes, so the two together
+# decompose the machine's advantage into exposure vs residual skill.
 #
 # Positive gap = the machine won that period. CONDITIONAL on mandate: fund i is
 # differenced against the machine run under ITS OWN mandate m(i), so the
@@ -1417,6 +1456,14 @@ build_dv <- function(fund_ret_mat, ml_ret_mat, period, factor_mat,
     dplyr::left_join(
       tibble::tibble(mandate = names(ml_cols), ml_benchmark = unname(ml_cols)),
       by = "ml_benchmark"
+    ) %>%
+    # RAW machine return on the same 15th-to-15th windows, for the
+    # non-risk-adjusted gap below.
+    dplyr::left_join(
+      tibble::as_tibble(ml_ret_mat[, unname(ml_cols), drop = FALSE]) %>%
+        dplyr::mutate(period = period) %>%
+        tidyr::pivot_longer(-period, names_to = "ml_benchmark", values_to = "r_ml"),
+      by = c("period", "ml_benchmark")
     )
 
   tibble::as_tibble(fund_ra$ra) %>%
@@ -1428,9 +1475,23 @@ build_dv <- function(fund_ret_mat, ml_ret_mat, period, factor_mat,
         tidyr::pivot_longer(-period, names_to = "code", values_to = "n_obs_beta"),
       by = c("period", "code")
     ) %>%
+    # RAW fund return, same windows.
+    dplyr::left_join(
+      tibble::as_tibble(fund_ret_mat) %>%
+        dplyr::mutate(period = period) %>%
+        tidyr::pivot_longer(-period, names_to = "code", values_to = "r_fund"),
+      by = c("period", "code")
+    ) %>%
     dplyr::left_join(dplyr::select(fund_mandate, code, mandate), by = "code") %>%
     dplyr::left_join(ml_series, by = c("period", "mandate")) %>%
-    dplyr::mutate(gap = ra_ml - ra_fund) %>%
+    # Two DVs on identical rows. `gap` strips the six factors with trailing
+    # betas; `gap_raw` is the plain return difference and therefore still
+    # contains the machine-vs-fund difference in FACTOR EXPOSURE. The wedge
+    # gap_raw - gap is that exposure component. Both are kept on the
+    # risk-adjusted row set (filter on `gap`) so the two regressions in
+    # analysis_gap.R run on exactly the same sample and are comparable.
+    dplyr::mutate(gap = ra_ml - ra_fund,
+                  gap_raw = r_ml - r_fund) %>%
     dplyr::filter(!is.na(gap)) %>%
     # `mandate` is a FUND attribute and lives in `static`; carrying a second
     # copy out of here would collide on the join in build_gap_panel() and leave
@@ -1721,6 +1782,15 @@ build_gap_panel <- function(ml_index, ml_benchmark = ML_BENCHMARK_DEFAULT,
     tibble::tibble(code = codes, dup_cluster = codes, is_representative = TRUE)
   }
 
+  # Cluster size turns the DECLARED feeder label into an evidence-based one:
+  # a feeder is only redundant if some other in-sample fund actually shares its
+  # return cluster. `dup` carries exactly one row per code, so a plain count is
+  # the number of funds in the cluster.
+  dup <- dup %>%
+    dplyr::group_by(dup_cluster) %>%
+    dplyr::mutate(cluster_n_funds = dplyr::n()) %>%
+    dplyr::ungroup()
+
   panel <- fund_tv %>%
     dplyr::left_join(dv$gap, by = c("code", "period")) %>%
     dplyr::left_join(dup, by = "code") %>%
@@ -1734,9 +1804,15 @@ build_gap_panel <- function(ml_index, ml_benchmark = ML_BENCHMARK_DEFAULT,
     dplyr::mutate(
       fund_age_yrs    = as.numeric(period - inception) / 365.25,
       gestora_age_yrs = as.numeric(period - gestora_inception) / 365.25,
-      # Main sample: stock pickers only. Feeders and funds-of-funds are
-      # different estimands and must not be silently pooled.
-      in_main_sample  = !is_feeder & !is_fof & !is.na(aum)
+      # A declared feeder is only REDUNDANT when another in-sample fund shares
+      # its return cluster. A singleton feeder is a distinct series and stays:
+      # under CVM 175 a "Classe Única de Cotas do X" is the fund, not a second
+      # copy of a master that is also in the panel. Genuine duplicates are still
+      # collapsed, both here and by `is_representative`.
+      is_redundant_feeder = is_feeder & cluster_n_funds > 1L,
+      # Main sample: stock pickers only. Redundant feeders and funds-of-funds
+      # are different estimands and must not be silently pooled.
+      in_main_sample  = !is_redundant_feeder & !is_fof & !is.na(aum)
     )
 
   assert_panel(panel)
@@ -1816,7 +1892,7 @@ assert_panel <- function(panel) {
   # fund was differenced against nothing. The `mandate` column itself must
   # exist: a name collision on the joins silently renames it to mandate.x /
   # mandate.y, and every check below would then pass on a NULL.
-  for (nm in c("mandate", "ml_benchmark", "gap")) {
+  for (nm in c("mandate", "ml_benchmark", "gap", "gap_raw")) {
     if (!nm %in% names(panel)) {
       rlang::abort(sprintf("gap_panel: required column `%s` is missing (join collision?).", nm))
     }
@@ -1834,6 +1910,8 @@ assert_panel <- function(panel) {
             sum(panel$in_main_sample, na.rm = TRUE)),
     sprintf("  scored rows by mandate: %s\n",
             paste(sprintf("%s=%d", names(arms), as.integer(arms)), collapse = ", ")),
+    sprintf("  mean gap %.3f (risk-adjusted) vs %.3f (raw return) pp/month\n",
+            mean(scored$gap), mean(scored$gap_raw, na.rm = TRUE)),
     "REMINDERS\n",
     "  * The gap is CONDITIONAL on mandate: each fund is differenced against the\n",
     "    machine run under its own mandate. Never pool a gap across mandates\n",

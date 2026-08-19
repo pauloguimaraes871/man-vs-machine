@@ -161,8 +161,11 @@ test_that("the estimation sample is temporally coherent", {
   expect_none(isTRUE_vec(s) & p$gestora_age_yrs < 0,
               "negative gestora age inside in_main_sample", keys)
 
-  # in_main_sample must mean exactly what it says.
-  expect_none(isTRUE_vec(s) & p$is_feeder, "feeder inside in_main_sample", keys)
+  # in_main_sample must mean exactly what it says. Note the gate is
+  # is_redundant_feeder, NOT is_feeder: a declared feeder with no twin in the
+  # panel is a distinct series and deliberately stays (see build_gap_panel.R).
+  expect_none(isTRUE_vec(s) & p$is_redundant_feeder,
+              "redundant feeder inside in_main_sample", keys)
   expect_none(isTRUE_vec(s) & p$is_fof,    "fund-of-funds inside in_main_sample", keys)
   expect_none(isTRUE_vec(s) & is.na(p$aum), "missing aum inside in_main_sample", keys)
 })
@@ -215,6 +218,57 @@ test_that("the dependent variable is present, consistent, and free of look-ahead
 
   # rho_machine is a correlation.
   expect_none(abs(p$rho_machine) > 1 + 1e-9, "rho_machine outside [-1, 1]", keys)
+})
+
+test_that("index-tracking classes are benchmarked against the ibov machine", {
+  p <- read_built_panel()
+  keys <- p[, c("code", "period")]
+
+  # They are NOT a separate arm -- they must route to average_ibov like any
+  # other class that falls back to the ibov mandate.
+  idx <- p$anbima_class %in% c("Ações Índice Ativo", "Ações Indexados")
+  expect_true(all(p$mandate[idx] == "ibov"))
+  expect_none(idx & !is.na(p$ml_benchmark) & p$ml_benchmark != "average_ibov",
+              "index-tracking row not benchmarked against average_ibov", keys)
+})
+
+test_that("the raw gap is the plain return difference", {
+  p <- read_built_panel()
+  keys <- p[, c("code", "period")]
+
+  expect_true("gap_raw" %in% names(p))
+
+  # gap_raw must be defined wherever gap is: build_dv() emits both on the same
+  # rows so the two regressions run on an identical sample.
+  d <- !is.na(p$gap)
+  expect_none(d & is.na(p$gap_raw), "scored row with no gap_raw", keys)
+
+  # It must be the RAW difference, i.e. reconstructable from the raw legs, and
+  # genuinely different from the risk-adjusted gap (otherwise the six-factor
+  # adjustment silently did nothing).
+  r <- d & !is.na(p$r_ml) & !is.na(p$r_fund)
+  expect_equal(p$gap_raw[r], (p$r_ml - p$r_fund)[r], tolerance = 1e-9)
+  expect_true(mean(abs(p$gap_raw[d] - p$gap[d]), na.rm = TRUE) > 1e-6)
+})
+
+test_that("the feeder screen only removes feeders that have a twin", {
+  p <- read_built_panel()
+
+  st <- dplyr::distinct(p, code, is_feeder, is_redundant_feeder,
+                        cluster_n_funds, is_fof)
+
+  # A redundant feeder must BE a feeder and must actually share its cluster.
+  expect_true(all(st$is_redundant_feeder <= st$is_feeder))
+  red <- st[st$is_redundant_feeder, ]
+  if (nrow(red) > 0L) expect_true(all(red$cluster_n_funds > 1L))
+
+  # A singleton feeder is a distinct series and must survive the screen.
+  solo <- st[st$is_feeder & st$cluster_n_funds == 1L, ]
+  if (nrow(solo) > 0L) expect_true(all(!solo$is_redundant_feeder))
+
+  # The fund-of-funds screen must not be inert: the refined export reports
+  # fundo_cotas == "Não" for every fund, so a rule requiring it never fires.
+  expect_true(sum(st$is_fof) > 0L)
 })
 
 
