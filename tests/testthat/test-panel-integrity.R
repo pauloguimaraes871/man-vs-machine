@@ -185,11 +185,33 @@ test_that("the dependent variable is present, consistent, and free of look-ahead
   expect_none(d & p$period < earliest_ok,
               "DV present before the trailing window completes", keys)
 
-  # One ML benchmark per build, and the ML residual is common to all funds
-  # within a period.
-  expect_equal(dplyr::n_distinct(stats::na.omit(p$ml_benchmark)), 1L)
-  per_period <- tapply(p$ra_ml[d], p$period[d], function(x) length(unique(round(x, 12))))
-  expect_true(all(per_period == 1L))
+  # CONDITIONAL BENCHMARK. The gap is no longer common within a period: each
+  # fund is differenced against the machine run under its own mandate, so
+  # ml_benchmark takes one value PER MANDATE and ra_ml is common only within
+  # (period, mandate). A single distinct benchmark here would mean the mandate
+  # routing silently collapsed back to one machine.
+  expect_true(all(stats::na.omit(p$mandate) %in% ML_MANDATES))
+  expect_equal(sort(unique(stats::na.omit(p$ml_benchmark[d]))),
+               sort(unique(paste0("average_", p$mandate[d]))))
+
+  # ml_benchmark must be a function of mandate alone -- one column per mandate,
+  # and no mandate served by two different columns.
+  route <- unique(data.frame(mandate = p$mandate[d], col = p$ml_benchmark[d]))
+  expect_equal(sum(duplicated(route$mandate)), 0L)
+  expect_equal(sum(duplicated(route$col)), 0L)
+
+  # The machine residual is common within (period, mandate).
+  per_cell <- tapply(p$ra_ml[d], paste(p$period[d], p$mandate[d]),
+                     function(x) length(unique(round(x, 12))))
+  expect_true(all(per_cell == 1L))
+
+  # ...and genuinely differs ACROSS mandates. If every mandate produced the same
+  # ra_ml the conditional design would be doing no work, which would point at
+  # four identical cohorts rather than four mandates.
+  if (dplyr::n_distinct(p$mandate[d]) > 1L) {
+    spread <- tapply(p$ra_ml[d], p$period[d], function(x) diff(range(x)))
+    expect_true(max(spread, na.rm = TRUE) > 1e-8)
+  }
 
   # rho_machine is a correlation.
   expect_none(abs(p$rho_machine) > 1 + 1e-9, "rho_machine outside [-1, 1]", keys)

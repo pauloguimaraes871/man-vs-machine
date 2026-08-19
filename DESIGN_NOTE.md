@@ -208,13 +208,51 @@ or an information ratio:
 
 ```
 ra(i,t)  = r(i,t) - rf(t) - beta_hat(i,t-1)' f(t)
-gap(i,t) = ra_ML(t) - ra(i,t)
+gap(i,t) = ra_m(i)(t) - ra(i,t)
 ```
 
 `beta_hat(i,t-1)` is fitted on a strictly trailing 36-month window. A fund-period is
 eligible for the gap only with a current return and all 36 preceding returns needed
 for that fit. This is a row-level, economically available-data rule; it is not a
 full-sample survival screen.
+
+### 7.1 The benchmark is conditional on mandate
+
+`m(i)` is fund *i*'s **mandate**, not a single global machine. The machine was run
+under four mandates, each with its own benchmark universe and eligibility rule
+(`run_paper_machine.R:293`), and each fund is differenced against the machine that
+faced *its* opportunity set:
+
+| ANBIMA `Classificação Anbima` | Machine cohort |
+|---|---|
+| Ações Dividendos | `idiv` |
+| Ações Small Caps | `smll` |
+| Ações Sustentabilidade/Governança, **or** an ESG/sustainability/governance name | `isee` |
+| everything else | `ibov` |
+
+Rationale: a mandate constrains the investable universe, so part of any gap measured
+against a broad-market machine would be a **universe effect** rather than a skill
+effect. A small-cap fund losing to an IBOV-universe machine may simply have been
+denied the large caps that machine held.
+
+Two implementation details are load-bearing.
+
+- The map keys off the **raw** `anbima_class`, never `anbima_class_ext`, which
+  overwrites the class with "Quantitativo"/"Multifundos" and would silently reassign
+  those funds to `ibov`.
+- ANBIMA classifies only **one** fund in the refined sample as
+  Sustentabilidade/Governança, so the `isee` arm also admits funds whose name declares
+  an ESG mandate (owner's rule, 2026-08-18). The name test requires word boundaries:
+  a bare substring match on "asg" captures "Itaú Asgard Institucional", which has no
+  ESG mandate. Class rule ∪ name rule gives 19 funds, with no collisions against
+  Dividendos or Small Caps.
+
+Arm sizes in the built panel (scored fund-periods): `ibov` 24,420 · `idiv` 1,509 ·
+`smll` 1,277 · `isee` 769.
+
+**Do not pool a gap across mandates** without a mandate fixed effect or an explicit
+apples-to-apples argument: the four arms are differenced against four different
+benchmarks and their levels are not directly comparable.
 
 ### Primary specification — pooled panel, no time fixed effects
 
@@ -233,11 +271,18 @@ gap(i,t) = b0 + b1·PL_fundo(i,t) + b2·PL_gestora(i,t)
 
 ### Robustness specification — time fixed effects
 
-Add period fixed effects to the primary specification. This absorbs the common ML
-return component and all other period shocks. State **main effects** are then not
-identified, but interactions between states and fund characteristics remain
-identified and are robust to arbitrary common shocks.
+Add period fixed effects to the primary specification. This absorbs all period shocks
+common to every fund. State **main effects** are then not identified, but interactions
+between states and fund characteristics remain identified and are robust to arbitrary
+common shocks.
 
+**Changed by the conditional benchmark (2026-08-18).** With a single global machine the
+DV contained one common `ra_ML(t)`, so time FE absorbed the machine leg *by
+construction*. They no longer do. Time FE now absorb only the **common component** of
+the machine leg; the cross-mandate differences in `ra_m(t)` survive and are identified
+off the within-period variation across the four arms. This is a gain in identification,
+but the earlier description — "the machine drops out under time FE" — is now wrong and
+must not be repeated in the manuscript.
 ### Specification warnings
 
 - **Tracking error is a bad control.** It is an outcome of the skill being measured — a
@@ -370,12 +415,45 @@ fund-of-funds flag; ANBIMA aggregate industry AUM; Selic series.
 
 ## 13. Implementation status
 
-- `build_gap_panel.R` now reads the daily and cadastral panels; constructs opening-AUM,
-  flow, manager, industry, and partial-holdings covariates; and provides rolling
-  risk-adjustment and residual-gap helpers. It does **not yet** assemble the dependent
-  variable or mediators into the final panel, nor estimate any regression. `plots.R`
-  remains untouched.
-- No data acquired.
+### Build of 2026-08-18 — refined sample, conditional benchmark
+
+`build_gap_panel.R` builds end to end and writes `data/derived/gap_panel.qs` and
+`industry_panel.qs`. 125 tests pass (`tests/testthat/`), 58 of them integration
+assertions on the built artefact.
+
+**Inputs, all switched to the refined vintage.** `bases_fundos_diarios_refined`,
+`aum_diarios_refined`, `flow_diarios_refined`, `n_investors_diarios_refined`,
+`CDI_diarios_refined`, `dados_cadastrais_refined`, `top_{1..15}_w_refined`. 703 funds
+(701 usable across all four daily panels), 2010-01-01..2026-07-31. The refined exports
+removed feeder/mirror vehicles at source and are **not a subset** of the original
+files — 171 of the 703 codes are absent from them — so the vintages must never be
+mixed within a build.
+
+**Machine.** `data/derived/machine_run/meta_grid.qs` (local paper run, grid arm),
+replacing the pinned 2024-05 bundle. Four mandate cohorts on one shared 128-period
+index, 2015-12-15..2026-07-15.
+
+**Factor basis.** Now the local run's `screen.qs` signal ports rather than the pinned
+2024-05 bundle, which stops before the panel does. One deviation from `plots.R`: the
+new gold features retired `assets_gr1y_tr`, so the CMA leg uses `assets_gr1y`
+(owner's decision, 2026-08-18). The other five legs are unchanged. **The published
+attribution tables must be re-run before they are reported alongside these gaps.**
+
+**Resulting panel.** 89,728 fund-periods, 701 funds, 43,084 in the main sample;
+27,975 scored rows over 92 periods, 2018-12-15..2026-07-15 (128 machine periods less
+the 36-period beta burn-in). That is up from 59 periods in the previous build.
+
+### Known state, carried forward
+
+- **Curated quant-validation set is stale.** 10 of the 20 `QUANT_VALIDATION_CODES` are
+  absent from the refined snapshot. The assertion now warns and lists them rather than
+  aborting (owner's decision, 2026-08-18); re-curate against the refined snapshot
+  before the label is used for anything beyond a diagnostic.
+- **Duplicate screen is much reduced but not inert.** 653 clusters across 701 funds,
+  48 funds flagged non-representative. Expected to be near-inert on a feeder-free
+  sample; the residual 48 are worth a look.
+- `analysis_gap.R` has **not** been updated for the conditional benchmark and the new
+  sample. It predates both.
 - No citation verified against the actual papers.
 - §5 prose in `manuscript.tex` remains unwritten — deliberately, and it should now be
   drafted against this frame rather than the old one.

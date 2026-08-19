@@ -54,6 +54,44 @@ MAX_LEVEL_AGE_DAYS <- 15L
 # optimiser. Run mvo_box (and the rest) as the H7 complexity/construction ladder.
 ML_BENCHMARK_DEFAULT <- "average"
 
+# ---- Conditional (per-mandate) benchmark -----------------------------------
+# The machine was run under four mandates (run_paper_machine.R:293), each with
+# its own benchmark universe. Comparing an ESG or a small-cap fund against the
+# IBOV machine is not an apples-to-apples contest: the mandate constrains the
+# opportunity set, so part of any measured "gap" would be a universe effect
+# rather than a skill effect.
+#
+# Each fund is therefore differenced against the machine run under ITS OWN
+# mandate:  gap(i,t) = ra_m(i)(t) - ra_i(t).
+#
+# CONSEQUENCE FOR SPEC 2 (DESIGN_NOTE.md S7): the DV no longer contains a single
+# common ra_ml(t), so time FE no longer absorb the machine leg BY CONSTRUCTION.
+# They now absorb only its common component; the cross-mandate differences in
+# the machine leg survive. This is a gain in identification, but Spec 2 no
+# longer reads as "the machine drops out" and must not be described that way.
+
+# The machine ran under four mandates, but only THREE are used as benchmarks.
+#
+# `isee` is deliberately excluded (owner's decision, 2026-08-18). ANBIMA
+# classifies exactly one fund in the refined sample as
+# Sustentabilidade/Governança, and even after widening the arm with an
+# ESG/sustainability/governance name rule it reached only 19 funds -- 10 with
+# enough history, 612 scored fund-periods. That is too thin to carry its own
+# benchmark, so ESG-mandated funds fall back to `ibov` like any other fund. The
+# isee cohort still exists in meta_grid.qs and the name rule is recoverable from
+# git history if the sample ever grows.
+ML_MANDATES <- c("ibov", "smll", "idiv")
+
+# ANBIMA `Classificação Anbima` -> mandate. Anything unlisted falls back to
+# ibov, the unconstrained broad-market mandate. Keys off the RAW anbima_class,
+# never anbima_class_ext, which overwrites the class with "Quantitativo" or
+# "Multifundos" and would silently reassign those funds to ibov.
+MANDATE_BY_ANBIMA_CLASS <- c(
+  "Ações Dividendos" = "idiv",
+  "Ações Small Caps" = "smll"
+)
+MANDATE_FALLBACK <- "ibov"
+
 # ---- Data screens ----------------------------------------------------------
 # Each constant below exists because the unscreened build produced values that
 # are impossible rather than merely extreme. Counts are from the 2026-08-04 run
@@ -89,21 +127,32 @@ MAX_EXPENSE_RATIO <- 10       # percent p.a.
 # Codes are NOT all numeric (~160 are alphanumeric, e.g. C0001368958), so never
 # filter on ^[0-9]+$.
 
+# REFINED SAMPLE (2026-08-18). The `_refined` exports are a revised universe
+# with feeder/mirror vehicles removed at source: 703 funds instead of 1,943, and
+# 2010-01-01..2026-07-31 instead of 2015-10-30..2024-05-15. They are NOT a
+# subset of the original exports -- 171 of the 703 codes are absent from the old
+# files -- so the two vintages must never be mixed within one build.
 DAILY_FILES <- tibble::tribble(
-  ~key,          ~file,                       ~unit,
-  "ret",         "bases_fundos_diarios.xlsx", "percent",
-  "aum",         "aum_diarios.xlsx",          "BRL thousands",
-  "net_flow",    "flow_diarios.xlsx",         "BRL thousands",
-  "n_investors", "n_investors_diarios.xlsx",  "count"
+  ~key,          ~file,                               ~unit,
+  "ret",         "bases_fundos_diarios_refined.xlsx", "percent",
+  "aum",         "aum_diarios_refined.xlsx",          "BRL thousands",
+  "net_flow",    "flow_diarios_refined.xlsx",         "BRL thousands",
+  "n_investors", "n_investors_diarios_refined.xlsx",  "count"
 )
+
+CDI_FILE <- "CDI_diarios_refined.xlsx"
 
 # The evaluation dates must be the actual ML backtest endpoints—not dates
 # inferred from the fund export—so human and machine returns share precisely
-# the same 15th-to-15th windows. This is the pinned paper-run input described
-# in data/meta_port_ind_signals/data.txt.
+# the same 15th-to-15th windows.
+#
+# This is now the LOCAL paper run (run_paper_machine.R, grid arm), not the
+# pinned 2024-05 bundle. Its structure differs: four per-mandate cohorts under
+# `$cohorts`, rather than a single `$backtest_meta_portfolios_results$
+# ibov_port_backtest_cohort`. All four share one 128-period index,
+# 2015-12-15..2026-07-15.
 ML_BACKTEST_FILE <- file.path(
-  DATA, "meta_port_ind_signals",
-  "gold_2024_05_comdinheiro_meta_port_backtest_results_bundles.qs"
+  DATA, "derived", "machine_run", "meta_grid.qs"
 )
 
 extract_code <- function(x) sub("^.*\n", "", x)
@@ -142,43 +191,67 @@ read_all_daily <- function() {
     purrr::map(read_economatica_daily)
 }
 
+# Pull one mandate's net-return meta_xts out of the local paper run. The four
+# mandate cohorts are siblings under `$cohorts`; each carries the eight
+# construction schemes plus `selected_bench_return`.
+ml_cohort_returns <- function(bundle, mandate) {
+  if (is.null(bundle$cohorts) || !mandate %in% names(bundle$cohorts)) {
+    rlang::abort(sprintf("ML backtest has no cohort '%s'. Present: %s.",
+                         mandate, paste(names(bundle$cohorts), collapse = ", ")))
+  }
+  cohort <- bundle$cohorts[[mandate]]
+  if (!base::isS4(cohort) ||
+      !("port_returns_m_xts_list" %in% methods::slotNames(cohort))) {
+    rlang::abort(sprintf("Cohort '%s' has an unexpected structure.", mandate))
+  }
+  net_returns <- cohort@port_returns_m_xts_list$net_returns_m_xts
+  if (!base::isS4(net_returns) ||
+      !("data" %in% methods::slotNames(net_returns))) {
+    rlang::abort(sprintf("Net-return series for '%s' has an unexpected structure.",
+                         mandate))
+  }
+  net_returns
+}
+
 # Read the ML evaluation index without relying on plots.R having been sourced.
 # `qs` stored the xts date index numerically in some paper-run artefacts, so
 # restore it explicitly before validating the calendar convention below.
+#
+# All four mandate cohorts must share one index: the conditional gap differences
+# a fund against ITS OWN mandate's machine, so a mandate on a shifted calendar
+# would silently compare mismatched windows.
 read_ml_index <- function(path = ML_BACKTEST_FILE) {
   if (!file.exists(path)) {
-    rlang::abort(sprintf("Pinned ML backtest file does not exist: %s", path))
+    rlang::abort(sprintf("ML backtest file does not exist: %s", path))
   }
   if (!requireNamespace("qs", quietly = TRUE) ||
       !requireNamespace("factoRverse", quietly = TRUE)) {
     rlang::abort("read_ml_index() requires the qs and factoRverse packages.")
   }
 
-  meta_result <- qs::qread(path)
-  backtest <- meta_result$backtest_meta_portfolios_results
-  if (is.null(backtest) || is.null(backtest$ibov_port_backtest_cohort)) {
-    rlang::abort("Pinned ML backtest is missing ibov_port_backtest_cohort.")
-  }
-  cohort <- backtest$ibov_port_backtest_cohort
-  if (!base::isS4(cohort) ||
-      !("port_returns_m_xts_list" %in% methods::slotNames(cohort))) {
-    rlang::abort("ibov_port_backtest_cohort has an unexpected structure.")
-  }
-  net_returns <- cohort@port_returns_m_xts_list$net_returns_m_xts
-  if (!base::isS4(net_returns) ||
-      !("data" %in% methods::slotNames(net_returns))) {
-    rlang::abort("ML net-return series has an unexpected structure.")
+  bundle <- qs::qread(path)
+
+  as_dates <- function(index) {
+    if (is.numeric(index)) {
+      as.Date(as.POSIXct(as.numeric(index), origin = "1970-01-01", tz = "UTC"))
+    } else {
+      as.Date(index)
+    }
   }
 
-  index <- zoo::index(net_returns@data)
-  if (is.numeric(index)) {
-    index <- as.Date(
-      as.POSIXct(as.numeric(index), origin = "1970-01-01", tz = "UTC")
-    )
-  } else {
-    index <- as.Date(index)
+  per_mandate <- purrr::map(
+    ML_MANDATES, ~ as_dates(zoo::index(ml_cohort_returns(bundle, .x)@data))
+  )
+  ref <- per_mandate[[1L]]
+  for (i in seq_along(per_mandate)) {
+    if (!identical(per_mandate[[i]], ref)) {
+      rlang::abort(sprintf(
+        "Mandate cohort '%s' is on a different date index than '%s'.",
+        ML_MANDATES[[i]], ML_MANDATES[[1L]]))
+    }
   }
-  validate_ml_index(index)
+
+  validate_ml_index(ref)
 }
 
 
@@ -212,9 +285,13 @@ reconcile_codes <- function(daily) {
 # =============================================================================
 # S3. Cadastral attributes  (verified against the real file)
 # =============================================================================
-# dados_cadastrais.xlsx: 1,945 funds x 38 usable columns (39-93 are empty).
-# The sheet's own column names are blank and the REAL header sits in row 1 of
-# the data, so read it then drop that row.
+# dados_cadastrais_refined.xlsx: 703 funds x 38 usable columns (39-93 are empty).
+# The sheet's own column names are blank and the REAL header sits INSIDE the
+# data. Its row differs between vintages (row 1 in the original export, row 3 in
+# the refined one), so the row is DETECTED rather than hardcoded: the previous
+# fixed `slice(-1)` left the literal header row ("Código\r\nAnbima") in `static`
+# as a phantom fund. It never matched a return column so it never reached a
+# regression, but it did inflate every fund count taken off `static`.
 
 CAD_COLS <- c(fund_name = 2L, status = 6L, code = 8L, anbima_class = 9L, efpc = 10L,
               multigestor = 11L, fundo_cotas = 12L, perf_fee = 13L,
@@ -255,29 +332,79 @@ add_quant_validation_label <- function(static_df) {
     dplyr::mutate(quant_validation_label = .data$code %in% QUANT_VALIDATION_CODES)
 }
 
+# The refined sample dropped 10 of the 20 curated codes -- the revision removed
+# feeder/cotas vehicles that the cadastral `Multigestor` flag did not mark as
+# such ("Warren Fatores Brasil Feeder Fc FIA", "V8 Veyron Fc FIF Ações", "Nu
+# Smart ... Classe Única de Cotas", "Mint Multifatores FIA Bdr"), plus several
+# funds that simply are not in the revised universe (Simpaul Momentum / Value /
+# Multifatores, Murano Multifatores, Itaú Smart Low Vol, BB Seleção Fatorial).
+#
+# A hard abort was right when the curated set and the export shared a vintage.
+# Across vintages it only says "the sample changed", which is the point of the
+# refinement. So: still abort if the labels are not one-to-one with the codes
+# that ARE present (that would be a join or de-dup fault), but WARN, listing the
+# dropped codes, when the snapshot simply no longer carries one.
 assert_quant_validation_labels <- function(static_df) {
-  found <- static_df$code[static_df$quant_validation_label]
+  found   <- static_df$code[static_df$quant_validation_label]
   missing <- setdiff(QUANT_VALIDATION_CODES, found)
+
   if (length(missing) > 0L) {
-    rlang::abort(paste0(
-      "Curated quant validation code(s) missing from cadastral data: ",
-      paste(missing, collapse = ", ")
+    rlang::warn(paste0(
+      "Curated quant validation code(s) absent from this cadastral snapshot (",
+      length(missing), " of ", length(QUANT_VALIDATION_CODES), "): ",
+      paste(missing, collapse = ", "),
+      ". Expected when the sample vintage changes; re-curate the set against ",
+      "the current snapshot if the diagnostic is to be used for inference."
     ))
   }
-  if (sum(static_df$quant_validation_label) != length(QUANT_VALIDATION_CODES)) {
+  if (length(found) != length(intersect(QUANT_VALIDATION_CODES, static_df$code))) {
     rlang::abort("Curated quant validation labels are not one-to-one with ANBIMA codes.")
+  }
+  if (length(found) == 0L) {
+    rlang::abort("No curated quant validation code survives in this cadastral snapshot.")
   }
   invisible(TRUE)
 }
 
+# Map each fund to the machine mandate it will be benchmarked against. The
+# declared ANBIMA class is the whole rule: anything not explicitly Dividendos or
+# Small Caps is benchmarked against the broad-market ibov machine, including
+# ESG-mandated funds (see ML_MANDATES for why isee was dropped).
+assign_mandate <- function(anbima_class) {
+  mandate <- dplyr::coalesce(unname(MANDATE_BY_ANBIMA_CLASS[anbima_class]),
+                             MANDATE_FALLBACK)
+  if (!all(mandate %in% ML_MANDATES)) {
+    rlang::abort("assign_mandate() produced a mandate outside ML_MANDATES.")
+  }
+  mandate
+}
+
+# Locate the export's header-as-data row by finding the "Código Anbima" label in
+# the code column, then drop it and everything above it. Aborts rather than
+# guessing: a silently missing header row would shift a real fund into the
+# header's place and corrupt every downstream join by one row.
+cadastral_header_row <- function(raw, code_col = CAD_COLS[["code"]]) {
+  col <- trimws(as.character(raw[[code_col]]))
+  hit <- which(grepl("^C.digo", col))
+  if (length(hit) == 0L) {
+    rlang::abort("Cadastral export: could not locate the 'Código Anbima' header row.")
+  }
+  if (length(hit) > 1L) {
+    rlang::abort(sprintf("Cadastral export: %d rows look like the header row.",
+                         length(hit)))
+  }
+  hit
+}
+
 build_static <- function() {
-  raw <- readxl::read_excel(file.path(DATA, "dados_cadastrais.xlsx"),
+  raw <- readxl::read_excel(file.path(DATA, "dados_cadastrais_refined.xlsx"),
                             .name_repair = "minimal")
+  header_row <- cadastral_header_row(raw)
 
   static <- CAD_COLS %>%
     purrr::map(~ trimws(as.character(raw[[.x]]))) %>%
     tibble::as_tibble() %>%
-    dplyr::slice(-1) %>%                              # drop header-as-data row
+    dplyr::slice(-seq_len(header_row)) %>%   # drop the header row and any preamble
     dplyr::filter(!is.na(code), code != "") %>%
     dplyr::transmute(
       code,
@@ -327,11 +454,34 @@ build_static <- function() {
         name_quant ~ "Quantitativo",
         is_fof     ~ "Multifundos",
         TRUE       ~ anbima_class
-      )
+      ),
+      # Which machine the fund is benchmarked against. Deliberately built from
+      # `anbima_class`, NOT `anbima_class_ext`.
+      mandate = assign_mandate(anbima_class)
     )
 
   assert_quant_validation_labels(static)
+  report_mandates(static)
   static
+}
+
+# Mandate composition is the first thing to check when a conditional-gap result
+# looks odd, so print it on every build rather than leaving it to be dug out of
+# the panel.
+report_mandates <- function(static_df) {
+  tab <- table(factor(static_df$mandate, levels = ML_MANDATES))
+  rlang::inform(paste0(
+    "Mandate assignment (", nrow(static_df), " funds): ",
+    paste(sprintf("%s=%d", names(tab), as.integer(tab)), collapse = ", ")
+  ))
+  empty <- names(tab)[as.integer(tab) == 0L]
+  if (length(empty) > 0L) {
+    rlang::warn(paste0(
+      "Mandate arm(s) with no funds: ", paste(empty, collapse = ", "),
+      ". The corresponding machine cohort will contribute no gap rows."
+    ))
+  }
+  invisible(tab)
 }
 
 build_gestora_static <- function(static_df) {
@@ -699,7 +849,7 @@ resolve_topx_duplicate_columns <- function(raw, codes, rank) {
     populated <- vapply(columns, function(i) any(!is.na(raw[[i + 1L]])), logical(1))
     if (sum(populated) > 1L) {
       rlang::abort(sprintf(
-        "top%d_w.xlsx has multiple populated columns for duplicated code %s.",
+        "top_%d_w_refined.xlsx has multiple populated columns for duplicated code %s.",
         rank, code
       ))
     }
@@ -712,7 +862,7 @@ resolve_topx_duplicate_columns <- function(raw, codes, rank) {
 
 read_topx_rank <- function(k) {
   
-  path   <- file.path(DATA, sprintf("top%d_w.xlsx", k))
+  path   <- file.path(DATA, sprintf("top_%d_w_refined.xlsx", k))
   header <- readxl::read_excel(path, skip = 3, n_max = 0, .name_repair = "minimal")
   raw    <- readxl::read_excel(path, skip = 3, na = "-",
                                col_types = c("text", rep("numeric", ncol(header) - 1L)),
@@ -1199,15 +1349,24 @@ rolling_risk_adjusted <- function(ret_mat, ret_ym, factor_mat,
 # -----------------------------------------------------------------------------
 # build_dv()
 #
-#   gap(i,t) = ra_ml(t) - ra_i(t)
+#   gap(i,t) = ra_m(i)(t) - ra_i(t)
 #
-# Positive gap = the machine won that period. `ml_col` selects which ML
-# portfolio is the benchmark; run the whole thing across the complexity ladder
-# (OLS ... NN3) to test H7 -- if the gap against OLS matches the gap against
-# NN3, the story is systematisation, not machine learning.
+# Positive gap = the machine won that period. CONDITIONAL on mandate: fund i is
+# differenced against the machine run under ITS OWN mandate m(i), so the
+# comparison holds the investable universe fixed and a measured gap cannot be a
+# universe effect in disguise.
+#
+# `ml_cols` is the mandate-keyed benchmark lookup from resolve_ml_benchmark();
+# `fund_mandate` maps code -> mandate. Both are required: silently defaulting an
+# unmapped fund to ibov would reintroduce exactly the mismatch this design
+# removes, so an unmapped fund is an error.
+#
+# Run the whole thing across the complexity ladder (OLS ... NN3) to test H7 --
+# if the gap against OLS matches the gap against NN3, the story is
+# systematisation, not machine learning.
 # -----------------------------------------------------------------------------
 build_dv <- function(fund_ret_mat, ml_ret_mat, period, factor_mat,
-                     ml_col,
+                     ml_cols, fund_mandate,
                      factor_ym = if (inherits(period, "Date")) {
                        format(period, "%Y-%m")
                      } else {
@@ -1222,18 +1381,43 @@ build_dv <- function(fund_ret_mat, ml_ret_mat, period, factor_mat,
       nrow(ml_ret_mat) != length(period)) {
     rlang::abort("ml_ret_mat must be a numeric matrix with one row per period.")
   }
-  if (!ml_col %in% colnames(ml_ret_mat)) {
-    rlang::abort(sprintf("'%s' is not a column of ml_ret_mat.", ml_col))
+  if (is.null(names(ml_cols)) || anyNA(ml_cols) || anyDuplicated(ml_cols)) {
+    rlang::abort("ml_cols must be a named, unique, mandate-keyed character vector.")
   }
-  
-  
+  missing_cols <- setdiff(ml_cols, colnames(ml_ret_mat))
+  if (length(missing_cols) > 0L) {
+    rlang::abort(sprintf("Benchmark column(s) absent from ml_ret_mat: %s.",
+                         paste(missing_cols, collapse = ", ")))
+  }
+  if (!is.data.frame(fund_mandate) ||
+      !all(c("code", "mandate") %in% names(fund_mandate))) {
+    rlang::abort("fund_mandate must be a data frame with `code` and `mandate`.")
+  }
+  unmapped <- setdiff(colnames(fund_ret_mat), fund_mandate$code)
+  if (length(unmapped) > 0L) {
+    rlang::abort(sprintf("%d fund(s) have no mandate assignment, e.g. %s.",
+                         length(unmapped), paste(utils::head(unmapped, 5), collapse = ", ")))
+  }
+  unknown <- setdiff(unique(fund_mandate$mandate), names(ml_cols))
+  if (length(unknown) > 0L) {
+    rlang::abort(sprintf("Mandate(s) with no benchmark column: %s.",
+                         paste(unknown, collapse = ", ")))
+  }
 
   fund_ra <- rolling_risk_adjusted(fund_ret_mat, factor_ym, factor_mat, window, min_obs)
-  ml_ra   <- rolling_risk_adjusted(ml_ret_mat[, ml_col, drop = FALSE],
-                                   factor_ym, factor_mat, window, min_obs)
 
-  ml_series <- tibble::tibble(period = period,
-                              ra_ml      = as.numeric(ml_ra$ra[, 1L]))
+  # All mandates' machine legs share one call, so every benchmark is fitted on
+  # the same trailing windows and the same factor basis as the funds.
+  ml_ra <- rolling_risk_adjusted(ml_ret_mat[, unname(ml_cols), drop = FALSE],
+                                 factor_ym, factor_mat, window, min_obs)
+
+  ml_series <- tibble::as_tibble(ml_ra$ra) %>%
+    dplyr::mutate(period = period) %>%
+    tidyr::pivot_longer(-period, names_to = "ml_benchmark", values_to = "ra_ml") %>%
+    dplyr::left_join(
+      tibble::tibble(mandate = names(ml_cols), ml_benchmark = unname(ml_cols)),
+      by = "ml_benchmark"
+    )
 
   tibble::as_tibble(fund_ra$ra) %>%
     dplyr::mutate(period = period) %>%
@@ -1244,19 +1428,34 @@ build_dv <- function(fund_ret_mat, ml_ret_mat, period, factor_mat,
         tidyr::pivot_longer(-period, names_to = "code", values_to = "n_obs_beta"),
       by = c("period", "code")
     ) %>%
-    dplyr::left_join(ml_series, by = "period") %>%
-    dplyr::mutate(gap = ra_ml - ra_fund, ml_benchmark = ml_col) %>%
-    dplyr::filter(!is.na(gap))
+    dplyr::left_join(dplyr::select(fund_mandate, code, mandate), by = "code") %>%
+    dplyr::left_join(ml_series, by = c("period", "mandate")) %>%
+    dplyr::mutate(gap = ra_ml - ra_fund) %>%
+    dplyr::filter(!is.na(gap)) %>%
+    # `mandate` is a FUND attribute and lives in `static`; carrying a second
+    # copy out of here would collide on the join in build_gap_panel() and leave
+    # the panel with mandate.x / mandate.y and no usable `mandate`. The column
+    # actually used is recorded as `ml_benchmark`, which does not collide.
+    dplyr::select(-mandate)
 }
 
 # -----------------------------------------------------------------------------
 # Inputs the DV needs, loaded standalone (plots.R is never sourced here).
-# Every definition below mirrors plots.R so the gap is measured against exactly
-# the factor basis and return convention used in the published tables.
+# The return convention mirrors plots.R exactly; the FACTOR BASIS no longer
+# does -- see SIGNAL_PORTS_FILE below.
 # -----------------------------------------------------------------------------
 
+# The six-factor basis now comes from the LOCAL paper run's screening stage
+# rather than the pinned 2024-05 bundle, because the pinned signal ports stop at
+# 2024-05-15 and the refined fund panel and the machine both run to 2026-07-15.
+#
+# NOT a drop-in swap. The new gold features retired `assets_gr1y_tr` (the CMA
+# leg); its untruncated sibling `assets_gr1y` is what exists now. The gap is
+# therefore measured on a slightly different CMA leg than the published
+# attribution tables, and those tables must be re-run before the two are
+# reported side by side. Owner's decision, 2026-08-18.
 SIGNAL_PORTS_FILE <- file.path(
-  DATA, "signal_ports", "gold_2024_05_comdinheiro_signal_port_backtest_cohorts.qs"
+  DATA, "derived", "machine_run", "screen.qs"
 )
 
 # Restore a serialised meta_xts whose index was stored numerically (plots.R:14).
@@ -1296,49 +1495,92 @@ compound_daily_to_windows <- function(obj, period_ends, codes = colnames(obj$val
 }
 
 # The eight meta-portfolio construction schemes, in the order they appear in the
-# pinned backtest. `selected_bench_return` is the IBOV benchmark, not a scheme.
+# backtest. Every mandate carries all eight. `selected_bench_return` is that
+# mandate's benchmark index (IBOV / SMLL / ISEE / IDIV), not a scheme.
 ML_SCHEMES <- c("rp", "rp_box", "hrp", "cs", "sw", "ew", "mvo", "mvo_box")
 
-# Resolve a short scheme name ("mvo_box") or the literal "average" to a return
-# series. "average" equal-weights all eight construction schemes, which is the
-# right benchmark when the question is about systematic investing in general
-# rather than about one optimiser's quirks -- it also removes the reader's
-# suspicion that a single scheme was chosen after seeing the results.
-resolve_ml_benchmark <- function(ml_ret_mat, scheme) {
-  scheme_col <- function(s) {
-    hit <- grep(sprintf("^c__meta_%s_ibov_s__", s), colnames(ml_ret_mat), value = TRUE)
+# Resolve a short scheme name ("mvo_box") or the literal "average" to ONE return
+# series PER MANDATE. "average" equal-weights all eight construction schemes,
+# which is the right benchmark when the question is about systematic investing
+# in general rather than about one optimiser's quirks -- it also removes the
+# reader's suspicion that a single scheme was chosen after seeing the results.
+#
+# Returns `cols`, a mandate-keyed lookup, because the conditional gap needs a
+# different benchmark column for each fund. Averaging happens WITHIN a mandate:
+# a cross-mandate average would define a benchmark no single fund is measured
+# against and would reintroduce the universe effect the mandate split removes.
+resolve_ml_benchmark <- function(ml_ret_mat, scheme, mandates = ML_MANDATES) {
+  scheme_col <- function(s, mandate) {
+    hit <- grep(sprintf("^c__meta_%s_%s_s__", s, mandate),
+                colnames(ml_ret_mat), value = TRUE)
     if (length(hit) != 1L) {
-      rlang::abort(sprintf("Scheme '%s' matched %d columns.", s, length(hit)))
+      rlang::abort(sprintf("Scheme '%s' for mandate '%s' matched %d columns.",
+                           s, mandate, length(hit)))
     }
     hit
   }
 
   if (identical(scheme, "average")) {
-    cols <- vapply(ML_SCHEMES, scheme_col, character(1))
-    avg  <- rowMeans(ml_ret_mat[, cols, drop = FALSE], na.rm = TRUE)
-    out  <- cbind(ml_ret_mat, average = avg)
-    return(list(mat = out, col = "average"))
+    avg <- vapply(mandates, function(mandate) {
+      cols <- vapply(ML_SCHEMES, scheme_col, character(1), mandate = mandate)
+      rowMeans(ml_ret_mat[, cols, drop = FALSE], na.rm = TRUE)
+    }, numeric(nrow(ml_ret_mat)))
+    colnames(avg) <- paste0("average_", mandates)
+    return(list(mat = cbind(ml_ret_mat, avg),
+                cols = stats::setNames(colnames(avg), mandates)))
   }
 
-  list(mat = ml_ret_mat, col = scheme_col(scheme))
+  list(mat  = ml_ret_mat,
+       cols = stats::setNames(
+         vapply(mandates, scheme_col, character(1), s = scheme), mandates))
 }
 
-# ML meta-portfolio net returns, on the same index as read_ml_index().
-read_ml_returns <- function(path = ML_BACKTEST_FILE) {
-  cohort <- qs::qread(path)$backtest_meta_portfolios_results$ibov_port_backtest_cohort
-  obj    <- restore_xts_dates(cohort@port_returns_m_xts_list$net_returns_m_xts)
-  m      <- as.matrix(zoo::coredata(obj@data))
-  rownames(m) <- format(as.Date(zoo::index(obj@data)))
-  m
+# ML meta-portfolio net returns for ALL mandates, on the same index as
+# read_ml_index(). Scheme columns already carry the mandate in their name
+# ("c__meta_rp_smll_s__..."), so they concatenate without collision; each
+# cohort's `selected_bench_return` does NOT, and is renamed per mandate.
+read_ml_returns <- function(path = ML_BACKTEST_FILE, mandates = ML_MANDATES) {
+  bundle <- qs::qread(path)
+
+  parts <- purrr::map(mandates, function(mandate) {
+    obj <- restore_xts_dates(ml_cohort_returns(bundle, mandate))
+    m   <- as.matrix(zoo::coredata(obj@data))
+    rownames(m) <- format(as.Date(zoo::index(obj@data)))
+    bench <- colnames(m) == "selected_bench_return"
+    colnames(m)[bench] <- paste0("bench_", mandate)
+    m
+  })
+
+  rn <- rownames(parts[[1L]])
+  for (p in parts) {
+    if (!identical(rownames(p), rn)) {
+      rlang::abort("Mandate cohorts do not share a return index.")
+    }
+  }
+
+  out <- do.call(cbind, parts)
+  if (anyDuplicated(colnames(out))) {
+    rlang::abort("Duplicate column names across mandate cohorts.")
+  }
+  rownames(out) <- rn
+  out
 }
 
-# Six-factor basis exactly as plots.R:1009 builds it: MKT as benchmark excess
-# over CDI, every style factor market-neutralised so long-only portfolios do not
-# collapse into collinearity.
+# Six-factor basis as plots.R:1009 builds it: MKT as benchmark excess over CDI,
+# every style factor market-neutralised so long-only portfolios do not collapse
+# into collinearity.
+#
+# ONE DEVIATION from plots.R: the CMA leg. plots.R uses `assets_gr1y_tr`, which
+# the current gold features no longer produce; `assets_gr1y` is the surviving
+# asset-growth signal and is used here (owner's decision, 2026-08-18). The other
+# five legs are unchanged. Do not report gaps built on this basis alongside the
+# published attribution tables until those are re-run.
+CMA_SIGNAL <- "assets_gr1y"
+
 build_factor_mat <- function(period_ends, cdi_daily) {
   sp <- restore_xts_dates(
-    qs::qread(SIGNAL_PORTS_FILE)$signal_port_backtest_cohort_ind_signals@
-      port_returns_m_xts_list$net_returns_m_xts
+    qs::qread(SIGNAL_PORTS_FILE)$signal_port_cohorts$
+      signal_port_backtest_cohort_ind_signals@port_returns_m_xts_list$net_returns_m_xts
   )
   sp_xts <- sp@data
   sp_ym  <- format(as.Date(zoo::index(sp_xts)), "%Y-%m")
@@ -1362,7 +1604,7 @@ build_factor_mat <- function(period_ends, cdi_daily) {
     mom = as.numeric(sp_xts[, fcol("prc_ret_12m_1m")]),
     rmw = as.numeric(sp_xts[, fcol("gp_at_12m")]),
     smb = as.numeric(sp_xts[, fcol("log_mkt_cap")]),
-    cma = as.numeric(sp_xts[, fcol("assets_gr1y_tr")])
+    cma = as.numeric(sp_xts[, fcol(CMA_SIGNAL)])
   ) %>%
     dplyr::left_join(tibble::tibble(ym = format(period_ends, "%Y-%m"), rf = rf),
                      by = "ym") %>%
@@ -1462,7 +1704,7 @@ build_gap_panel <- function(ml_index, ml_benchmark = ML_BENCHMARK_DEFAULT,
   conc     <- build_concentration_panel(ml_index)
 
   rlang::inform("Building the dependent variable ...")
-  dv <- build_gap_dv(daily, ml_index, codes, ml_benchmark)
+  dv <- build_gap_dv(daily, ml_index, codes, static, ml_benchmark)
 
   # Same-master feeders produce near-identical return series that look like
   # independent funds, inflating the cross-section and understating standard
@@ -1503,13 +1745,13 @@ build_gap_panel <- function(ml_index, ml_benchmark = ML_BENCHMARK_DEFAULT,
 }
 
 # Assemble the DV: compound fund and ML returns onto the 15th-to-15th index,
-# build the factor basis, then difference the realised risk-adjusted returns.
-# `rho_machine` comes free once both residual series exist.
-build_gap_dv <- function(daily, ml_index, codes,
+# build the factor basis, then difference each fund's realised risk-adjusted
+# return against the machine run under ITS OWN mandate. `rho_machine` comes free
+# once both residual series exist, and takes the same mandate assignment.
+build_gap_dv <- function(daily, ml_index, codes, static,
                          ml_benchmark = ML_BENCHMARK_DEFAULT) {
-  
-  
-  cdi_daily <- read_economatica_daily("CDI_diarios.xlsx")
+
+  cdi_daily <- read_economatica_daily(CDI_FILE)
 
   fund_m <- compound_daily_to_windows(daily$ret, ml_index, codes)
   ml_raw <- read_ml_returns()
@@ -1518,39 +1760,84 @@ build_gap_dv <- function(daily, ml_index, codes,
     rlang::abort("ML return index does not match the validated ml_index.")
   }
 
-  resolved     <- resolve_ml_benchmark(ml_raw, ml_benchmark)
-  ml_m         <- resolved$mat
-  ml_benchmark <- resolved$col
-  rlang::inform(sprintf("  ML benchmark column: '%s'.", ml_benchmark))
+  fund_mandate <- static %>%
+    dplyr::filter(code %in% colnames(fund_m)) %>%
+    dplyr::select(code, mandate)
+  if (anyDuplicated(fund_mandate$code)) {
+    rlang::abort("Cadastral data assigns more than one mandate to a fund.")
+  }
+
+  resolved <- resolve_ml_benchmark(ml_raw, ml_benchmark)
+  ml_m     <- resolved$mat
+  ml_cols  <- resolved$cols
+  rlang::inform(paste0(
+    "  ML benchmark columns: ",
+    paste(sprintf("%s -> '%s'", names(ml_cols), ml_cols), collapse = "; "), "."
+  ))
 
   factor_mat <- build_factor_mat(ml_index, cdi_daily)
 
-  gap <- build_dv(fund_m, ml_m, ml_index, factor_mat, ml_col = ml_benchmark)
+  gap <- build_dv(fund_m, ml_m, ml_index, factor_mat,
+                  ml_cols = ml_cols, fund_mandate = fund_mandate)
 
-  # Mediator, not a control (see the taxonomy at the top of this file).
-  fund_ra <- rolling_risk_adjusted(fund_m, format(ml_index, "%Y-%m"), factor_mat)
-  ml_ra   <- rolling_risk_adjusted(ml_m[, ml_benchmark, drop = FALSE],
-                                   format(ml_index, "%Y-%m"), factor_mat)
-  rho <- rolling_rho_machine(fund_ra$ra, as.numeric(ml_ra$ra[, 1L]))
+  # Mediator, not a control (see the taxonomy at the top of this file). Computed
+  # per mandate: rho against the wrong mandate's machine would measure universe
+  # overlap rather than the alignment of the manager's active bets.
+  ym      <- format(ml_index, "%Y-%m")
+  fund_ra <- rolling_risk_adjusted(fund_m, ym, factor_mat)
+  ml_ra   <- rolling_risk_adjusted(ml_m[, unname(ml_cols), drop = FALSE],
+                                   ym, factor_mat)
+
+  rho <- purrr::map(names(ml_cols), function(mandate) {
+    cols <- fund_mandate$code[fund_mandate$mandate == mandate]
+    cols <- intersect(cols, colnames(fund_ra$ra))
+    if (length(cols) == 0L) return(NULL)
+    matrix_to_long(
+      rolling_rho_machine(fund_ra$ra[, cols, drop = FALSE],
+                          as.numeric(ml_ra$ra[, ml_cols[[mandate]]])),
+      ml_index, "rho_machine"
+    )
+  }) %>%
+    purrr::compact() %>%
+    purrr::list_rbind()
 
   gap <- gap %>%
-    dplyr::left_join(
-      matrix_to_long(rho, ml_index, "rho_machine"),
-      by = c("code", "period")
-    )
+    dplyr::left_join(rho, by = c("code", "period"))
 
-  list(gap = gap, ml_benchmark = ml_benchmark, factor_mat = factor_mat)
+  list(gap = gap, ml_benchmark = ml_cols, factor_mat = factor_mat)
 }
 
 assert_panel <- function(panel) {
   if (anyDuplicated(panel[, c("code", "period")])) {
     rlang::abort("gap_panel: duplicate (code, period) rows.")
   }
+  # Every row with a gap must carry the mandate that produced it, and that
+  # mandate must be one the machine actually ran. A silent NA here would mean a
+  # fund was differenced against nothing. The `mandate` column itself must
+  # exist: a name collision on the joins silently renames it to mandate.x /
+  # mandate.y, and every check below would then pass on a NULL.
+  for (nm in c("mandate", "ml_benchmark", "gap")) {
+    if (!nm %in% names(panel)) {
+      rlang::abort(sprintf("gap_panel: required column `%s` is missing (join collision?).", nm))
+    }
+  }
+  scored <- panel[!is.na(panel$gap), , drop = FALSE]
+  if (nrow(scored) > 0L &&
+      (anyNA(scored$mandate) || !all(scored$mandate %in% ML_MANDATES))) {
+    rlang::abort("gap_panel: scored rows with a missing or unknown mandate.")
+  }
+
+  arms <- table(factor(scored$mandate, levels = ML_MANDATES))
   rlang::inform(paste0(
     sprintf("gap_panel: %d fund-periods, %d funds, %d in main sample.\n",
             nrow(panel), dplyr::n_distinct(panel$code),
             sum(panel$in_main_sample, na.rm = TRUE)),
+    sprintf("  scored rows by mandate: %s\n",
+            paste(sprintf("%s=%d", names(arms), as.integer(arms)), collapse = ", ")),
     "REMINDERS\n",
+    "  * The gap is CONDITIONAL on mandate: each fund is differenced against the\n",
+    "    machine run under its own mandate. Never pool a gap across mandates\n",
+    "    without a mandate fixed effect or an explicit apples-to-apples argument.\n",
     "  * log_pl_fundo is ENDOGENOUS to past performance (Berk-Green). Naive OLS\n",
     "    of alpha on size is biased -- use Pastor-Stambaugh-Taylor recursive\n",
     "    demeaning, or instrument size.\n",
@@ -1558,8 +1845,9 @@ assert_panel <- function(panel) {
     "    them off the RHS of the main gap regression.\n",
     "  * Prefer industry_flow_cum / industry_flow_rate over industry_pl:\n",
     "    summed AUM embeds the cumulative returns of the panel's own funds.\n",
-    "  * Run find_duplicate_clusters() before estimating -- 38% of the universe\n",
-    "    is feeder/mirror vehicles."))
+    "  * The refined sample removed feeder/mirror vehicles at source, so\n",
+    "    find_duplicate_clusters() should now find few or no clusters. If it\n",
+    "    still finds many, the wrong export vintage is being read."))
   invisible(TRUE)
 }
 

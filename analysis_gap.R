@@ -10,11 +10,21 @@
 # SPECIFICATIONS (DESIGN_NOTE.md S7)
 #   Spec 1  headline. NO time fixed effects, two-way clustered SEs (fund and
 #           period). The machine stays in the DV and market-state main effects
-#           are identified off the ~59 usable periods.
-#   Spec 2  robustness. Time FE. State main effects drop out BY CONSTRUCTION --
-#           time FE absorb ra_ml(t) entirely -- but fund-trait coefficients
-#           survive and are immune to any common shock. Stability across the two
-#           is the result worth reporting.
+#           are identified off the ~84 usable periods.
+#   Spec 2  robustness. Time FE. These absorb every shock COMMON to all funds in
+#           a period. Fund-trait coefficients survive and are immune to any such
+#           shock. Stability across the two is the result worth reporting.
+#
+# THE BENCHMARK IS CONDITIONAL ON MANDATE (DESIGN_NOTE.md S7.1). Each fund is
+# differenced against the machine run under its own mandate -- idiv for
+# Dividendos, smll for Small Caps, ibov for everything else -- so the DV no
+# longer contains one common ra_ml(t). Two consequences here:
+#
+#   * Time FE no longer absorb the machine leg BY CONSTRUCTION, only its common
+#     component. Do not describe Spec 2 as "the machine drops out".
+#   * The three arms are differenced against three different benchmarks, so
+#     their levels are not directly comparable. Every pooled specification below
+#     carries a MANDATE fixed effect, and the descriptive cuts report by arm.
 #
 # Group D variables (decay_slope, n_pos_min, rho_machine, hhi_top15) are
 # MEDIATORS and are deliberately absent from the main right-hand side. They get
@@ -35,6 +45,23 @@ dir.create(FIG_DIR, showWarnings = FALSE); dir.create(TAB_DIR, showWarnings = FA
 panel    <- qs::qread(PANEL)
 industry <- qs::qread(INDUSTRY)
 
+# Constants only -- gap_panel.run = FALSE loads the definitions without running
+# a build. Needed for ML_MANDATES (the canonical arm order) and CDI_FILE; the
+# H7 ladder sources the same file again inside its own frame for scoping.
+local({
+  old <- options(gap_panel.run = FALSE)
+  on.exit(options(old), add = TRUE)
+  source(here::here("build_gap_panel.R"), local = FALSE)
+})
+
+if (!all(stats::na.omit(panel$mandate) %in% ML_MANDATES)) {
+  rlang::abort(paste0(
+    "gap_panel.qs carries mandate(s) outside ML_MANDATES (",
+    paste(setdiff(unique(stats::na.omit(panel$mandate)), ML_MANDATES), collapse = ", "),
+    "). The panel and build_gap_panel.R are out of sync -- rebuild the panel."
+  ))
+}
+
 theme_set(theme_minimal(base_size = 11) +
             theme(panel.grid.minor = element_blank(),
                   plot.title = element_text(face = "bold", size = 12),
@@ -45,8 +72,8 @@ theme_set(theme_minimal(base_size = 11) +
 # 1. Estimation sample, built as an explicit waterfall
 # =============================================================================
 # Every drop is named and counted. The waterfall IS a table in the paper: going
-# from 1,938 tracked funds to a few hundred estimable ones is a fact about
-# Brazilian fund data, not a detail to bury in a footnote.
+# from the 701 funds tracked in the refined sample to a few hundred estimable
+# ones is a fact about Brazilian fund data, not a detail to bury in a footnote.
 
 waterfall <- tibble::tibble(
   step = character(), rows = integer(), funds = integer(), periods = integer()
@@ -74,13 +101,14 @@ lump_levels <- function(x, n = 6L, other = "Other") {
 
 est <- s5 %>%
   dplyr::mutate(
-    period_f = factor(period),
-    log_age  = log1p(pmax(fund_age_yrs, 0)),
-    perf_fee = as.integer(perf_fee),
-    bank     = as.integer(bank_affiliated),
-    efpc     = as.integer(efpc),
-    retail   = as.integer(investor_type == "Geral"),
-    anbima_f = lump_levels(anbima_class)
+    period_f  = factor(period),
+    mandate_f = factor(mandate, levels = ML_MANDATES),
+    log_age   = log1p(pmax(fund_age_yrs, 0)),
+    perf_fee  = as.integer(perf_fee),
+    bank      = as.integer(bank_affiliated),
+    efpc      = as.integer(efpc),
+    retail    = as.integer(investor_type == "Geral"),
+    anbima_f  = lump_levels(anbima_class)
   )
 
 readr_write <- function(tbl, file) {
@@ -89,15 +117,50 @@ readr_write <- function(tbl, file) {
 readr_write(waterfall, "sample_waterfall.csv")
 print(waterfall)
 
+# Composition of the estimation sample by benchmark arm. Report this next to the
+# waterfall: the three arms are very unequal, and a coefficient driven entirely
+# by ibov should not be read as a statement about mandated funds.
+by_mandate <- est %>%
+  dplyr::group_by(mandate) %>%
+  dplyr::summarise(rows = dplyr::n(), funds = dplyr::n_distinct(code),
+                   periods = dplyr::n_distinct(period),
+                   mean_gap = mean(gap), sd_gap = stats::sd(gap),
+                   pct_machine_ahead = mean(gap > 0), .groups = "drop") %>%
+  dplyr::arrange(dplyr::desc(rows))
+readr_write(by_mandate, "gap_by_mandate.csv")
+cat("\n=== Estimation sample by benchmark arm ===\n")
+print(as.data.frame(by_mandate), digits = 3)
+
+# A regressor with no variation in the estimation sample makes crossprod(X)
+# singular and chol() fails inside the two-way vcov -- an opaque linear-algebra
+# error a long way from its cause. Drop such columns here, loudly, so the model
+# that runs is the model that is reported.
+#
+# This is not hypothetical: the refined sample has `perf_fee` FALSE for all
+# 21,662 candidate rows (the export carries no "Sim" for Cobra taxa
+# performance), and `leveraged` is "N" for all 703 funds.
+drop_degenerate <- function(vars, data) {
+  n_unique <- vapply(vars, function(v) dplyr::n_distinct(data[[v]][!is.na(data[[v]])]),
+                     integer(1))
+  dead <- vars[n_unique < 2L]
+  if (length(dead) > 0L) {
+    rlang::warn(paste0(
+      "Dropping regressor(s) with no variation in the estimation sample: ",
+      paste(dead, collapse = ", "), "."
+    ))
+  }
+  setdiff(vars, dead)
+}
+
 
 # =============================================================================
 # 2. Clustered inference (implemented here: no sandwich/fixest available)
 # =============================================================================
 # Cameron-Gelbach-Miller two-way clustering:
 #     V = V_fund + V_period - V_(fund x period)
-# Each component is the usual cluster-robust sandwich. With ~59 period clusters
-# the time dimension is at the low end of what CRVE handles well, so period-level
-# inference should be read as indicative rather than exact.
+# Each component is the usual cluster-robust sandwich. With ~84 period clusters
+# the time dimension is adequate but not generous, so period-level inference
+# should still be read as indicative rather than exact.
 
 cluster_meat <- function(X, u, g) {
   g <- as.character(g)
@@ -115,6 +178,23 @@ cluster_meat <- function(X, u, g) {
 vcov_twoway <- function(fit, c1, c2) {
   X <- stats::model.matrix(fit)
   u <- stats::residuals(fit)
+
+  # lm() SILENTLY DROPS rows with NA in any model variable, so a cluster vector
+  # taken from the full estimation frame is longer than X and no longer aligned
+  # with it. Left uncorrected this either errors out of bounds in cluster_meat()
+  # or -- worse -- groups the wrong rows together and returns a plausible-looking
+  # standard error. Align to the rows the fit actually used.
+  omit <- stats::na.action(fit)
+  if (!is.null(omit)) {
+    c1 <- c1[-as.integer(omit)]
+    c2 <- c2[-as.integer(omit)]
+  }
+  if (length(c1) != nrow(X) || length(c2) != nrow(X)) {
+    rlang::abort(sprintf(
+      "Cluster vectors (%d, %d) do not align with the model matrix (%d rows).",
+      length(c1), length(c2), nrow(X)))
+  }
+
   keep <- stats::complete.cases(X) & is.finite(u)
   X <- X[keep, , drop = FALSE]; u <- u[keep]
   c1 <- c1[keep]; c2 <- c2[keep]
@@ -164,11 +244,22 @@ tidy_clustered <- function(fit, c1, c2, keep_pattern = NULL) {
 # associations. A causal reading needs Pastor-Stambaugh-Taylor recursive
 # demeaning or an instrument, and the paper must say so.
 
-rhs_core <- c("log_pl_fundo", "log_pl_gestora", "redemption_days",
-              "expense_ratio", "perf_fee", "log_age", "bank", "retail", "efpc")
+rhs_core <- drop_degenerate(
+  c("log_pl_fundo", "log_pl_gestora", "redemption_days",
+    "expense_ratio", "perf_fee", "log_age", "bank", "retail", "efpc"),
+  est
+)
 
-f1 <- stats::as.formula(paste("gap ~", paste(rhs_core, collapse = " + ")))
-f2 <- stats::as.formula(paste("gap ~", paste(c(rhs_core, "period_f"), collapse = " + ")))
+# MANDATE FE in both specs. Without it the intercept averages three arms that
+# are differenced against three different machines, and any fund trait that
+# correlates with mandate (small caps are smaller, dividend funds cheaper)
+# would pick up the difference between benchmarks rather than a fund effect.
+# Only added when more than one arm is present, so the code still runs if a
+# future sample collapses to a single mandate.
+rhs_fe <- if (dplyr::n_distinct(est$mandate) > 1L) c(rhs_core, "mandate_f") else rhs_core
+
+f1 <- stats::as.formula(paste("gap ~", paste(rhs_fe, collapse = " + ")))
+f2 <- stats::as.formula(paste("gap ~", paste(c(rhs_fe, "period_f"), collapse = " + ")))
 
 m1 <- stats::lm(f1, data = est)
 m2 <- stats::lm(f2, data = est)
@@ -186,6 +277,20 @@ reg_out <- dplyr::full_join(
 readr_write(reg_out, "gap_regressions.csv")
 cat("\n=== Spec 1 (no time FE) / Spec 2 (time FE), two-way clustered ===\n")
 print(as.data.frame(reg_out), digits = 3)
+
+# The unconditional gap, which is the number the abstract quotes. Reported per
+# arm as well as pooled, because pooling averages three different contests.
+uncond <- purrr::map_dfr(c("pooled", ML_MANDATES), function(arm) {
+  d <- if (identical(arm, "pooled")) est else dplyr::filter(est, mandate == arm)
+  if (nrow(d) == 0L) return(NULL)
+  fit <- stats::lm(gap ~ 1, data = d)
+  tidy_clustered(fit, d$code, d$period) %>%
+    dplyr::transmute(arm, n = nrow(d), funds = dplyr::n_distinct(d$code),
+                     mean_gap = estimate, se = std_error, t = t, p = p)
+})
+readr_write(uncond, "gap_unconditional.csv")
+cat("\n=== Unconditional gap (pp/month), two-way clustered ===\n")
+print(as.data.frame(uncond), digits = 3)
 
 
 # =============================================================================
@@ -205,7 +310,7 @@ build_ladder <- function() {
   ml_index  <- read_ml_index()
   daily     <- read_all_daily()
   codes     <- reconcile_codes(daily)
-  cdi_daily <- read_economatica_daily("CDI_diarios.xlsx")
+  cdi_daily <- read_economatica_daily(CDI_FILE)
 
   fund_m  <- compound_daily_to_windows(daily$ret, ml_index, codes)
   fac     <- build_factor_mat(ml_index, cdi_daily)
@@ -213,18 +318,30 @@ build_ladder <- function() {
   fund_ra <- rolling_risk_adjusted(fund_m, ym, fac)$ra
 
   ml_raw <- read_ml_returns()
-  keep   <- est %>% dplyr::distinct(code, period)
+  # The mandate map must come from the SAME panel the estimation sample uses,
+  # so the ladder is computed on exactly the rows the regressions see.
+  keep <- est %>% dplyr::distinct(code, period, mandate)
 
   purrr::map_dfr(c(ML_SCHEMES, "average"), function(s) {
+    # One benchmark column per mandate, so the ladder holds the conditional
+    # design fixed and varies only the construction scheme.
     res   <- resolve_ml_benchmark(ml_raw, s)
-    ml_ra <- rolling_risk_adjusted(res$mat[, res$col, drop = FALSE], ym, fac)$ra
+    ml_ra <- rolling_risk_adjusted(res$mat[, unname(res$cols), drop = FALSE], ym, fac)$ra
+
+    ml_long <- tibble::as_tibble(ml_ra) %>%
+      dplyr::mutate(period = ml_index) %>%
+      tidyr::pivot_longer(-period, names_to = "ml_benchmark", values_to = "ra_ml") %>%
+      dplyr::left_join(
+        tibble::tibble(mandate = names(res$cols), ml_benchmark = unname(res$cols)),
+        by = "ml_benchmark"
+      ) %>%
+      dplyr::select(period, mandate, ra_ml)
 
     tibble::as_tibble(fund_ra) %>%
       dplyr::mutate(period = ml_index) %>%
       tidyr::pivot_longer(-period, names_to = "code", values_to = "ra_fund") %>%
-      dplyr::left_join(tibble::tibble(period = ml_index,
-                                      ra_ml = as.numeric(ml_ra[, 1L])), by = "period") %>%
       dplyr::inner_join(keep, by = c("code", "period")) %>%
+      dplyr::left_join(ml_long, by = c("period", "mandate")) %>%
       dplyr::filter(!is.na(ra_fund), !is.na(ra_ml)) %>%
       dplyr::summarise(
         scheme    = s,
@@ -299,8 +416,9 @@ p_flow <- ggplot(industry, aes(period, industry_net_flow / 1e3)) +
 ggsave(file.path(FIG_DIR, "industry_flows.png"), p_flow, width = 9, height = 4, dpi = 300, bg = "white")
 
 # --- 5.3 Entry and exit -----------------------------------------------------
-# Survivorship made visible: 756 of 1,945 funds in the cadastral file are
-# already cancelled, so a live-funds-only study would be badly biased.
+# Survivorship made visible: cancelled funds are retained in the refined
+# cadastral, so a live-funds-only study would be badly biased. The split below
+# reports the actual counts rather than asserting a stale one.
 births <- panel %>%
   dplyr::distinct(code, inception, status) %>%
   dplyr::filter(!is.na(inception)) %>%
@@ -351,6 +469,9 @@ p_hhi <- ggplot(hhi_gestora, aes(period, hhi)) +
 ggsave(file.path(FIG_DIR, "industry_manager_hhi.png"), p_hhi, width = 9, height = 3.5, dpi = 300, bg = "white")
 
 # --- 5.6 The gap over time --------------------------------------------------
+# Pooled first, then split by benchmark arm. The pooled series is dominated by
+# ibov (roughly 90% of rows), so the split is what shows whether the mandated
+# arms move with it or against it.
 gap_ts <- est %>%
   dplyr::group_by(period) %>%
   dplyr::summarise(mean_gap = mean(gap), med_gap = stats::median(gap),
@@ -361,9 +482,25 @@ p_gap <- ggplot(gap_ts, aes(period)) +
   geom_col(aes(y = mean_gap, fill = mean_gap > 0), width = 22, show.legend = FALSE) +
   scale_fill_manual(values = c(`TRUE` = "#1b6ca8", `FALSE` = "#c0392b")) +
   labs(title = "Human-machine gap over time",
-       subtitle = "Cross-sectional mean of ra_ml - ra_fund. Positive = the systematic benchmark is ahead",
+       subtitle = "Cross-sectional mean of ra_m(i) - ra_fund. Positive = the systematic benchmark is ahead",
        x = NULL, y = "Percent per month")
 ggsave(file.path(FIG_DIR, "gap_over_time.png"), p_gap, width = 9, height = 4, dpi = 300, bg = "white")
+
+gap_ts_mandate <- est %>%
+  dplyr::group_by(period, mandate) %>%
+  dplyr::summarise(mean_gap = mean(gap), n = dplyr::n(), .groups = "drop")
+readr_write(gap_ts_mandate, "gap_over_time_by_mandate.csv")
+
+p_gap_m <- ggplot(gap_ts_mandate, aes(period, mean_gap)) +
+  geom_hline(yintercept = 0, colour = "grey40", linewidth = 0.3) +
+  geom_line(aes(colour = mandate), linewidth = 0.6, show.legend = FALSE) +
+  facet_wrap(~mandate, ncol = 1, scales = "free_y") +
+  scale_colour_manual(values = c(ibov = "#1b6ca8", smll = "#2a9d5c", idiv = "#b8860b")) +
+  labs(title = "Human-machine gap over time, by benchmark arm",
+       subtitle = "Each arm is differenced against the machine run under its own mandate, so levels are not comparable across panels",
+       x = NULL, y = "Percent per month")
+ggsave(file.path(FIG_DIR, "gap_over_time_by_mandate.png"), p_gap_m,
+       width = 9, height = 6, dpi = 300, bg = "white")
 
 # --- 5.7 Structural characteristics -----------------------------------------
 chars <- est %>% dplyr::distinct(code, redemption_days, expense_ratio, decay_slope, n_pos_min)
