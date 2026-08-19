@@ -30,12 +30,49 @@ restore_meta_xts_dates <- function(x) {
   x
 }
 
-data_root <- here::here("data")
-result_folders <- list.dirs(data_root, full.names = FALSE, recursive = FALSE)
+# ---- Machine-run bundles ---------------------------------------------------
+# This reads the LOCAL paper run (run_paper_machine.R, grid arm), not the pinned
+# pre-compiled bundles.
+#
+# The previous loader walked every folder under data/ and assigned each one's
+# single .qs to a variable named after the folder. That layout no longer exists:
+# the pre-compiled bundles moved under data/pre_compiled_results/, data/derived/
+# now holds two .qs files rather than one, and data/checkpoints/ holds none, so
+# the walk fed qs::qread() a length-0 and a length-2 path and died at the first
+# folder. Name the three objects this script actually needs instead.
+#
+#   meta_grid  meta-portfolios: $cohorts$<mandate> is a port_backtest_cohort,
+#              $results the 32 individual (8 scheme x 4 mandate) backtests
+#   mb_grid    the ML models: an sb_metabacktest_results S4 carrying the meta
+#              learner, the 7 base learners and their OOS predictions
+#   learners   per-base-learner portfolios (cs and rp), built by the `learners`
+#              stage; $cohort is the port_backtest_cohort
+#   screen     signal portfolios, under $signal_port_cohorts
+MACHINE_RUN <- here::here("data", "derived", "machine_run")
 
-for (folder in result_folders) {
-  qs_file <- list.files(file.path(data_root, folder), pattern = "\\.qs$", full.names = TRUE)
-  assign(folder, qs::qread(qs_file, nthreads = 4))
+read_run_bundle <- function(file) {
+  path <- file.path(MACHINE_RUN, file)
+  if (!file.exists(path)) {
+    rlang::abort(paste0(
+      "Machine-run bundle not found: ", path,
+      ". Run run_paper_machine.R (STOP_AFTER = 'learners') first."
+    ))
+  }
+  qs::qread(path, nthreads = 4)
+}
+
+meta_grid <- read_run_bundle("meta_grid.qs")
+mb_grid   <- read_run_bundle("mb_grid.qs")
+learners  <- read_run_bundle("learners_grid.qs")
+screen    <- read_run_bundle("screen.qs")
+
+# The mandate whose portfolios every exhibit below is built from. The machine
+# ran four; the paper's figures are the broad-market contest.
+RUN_MANDATE <- "ibov"
+meta_cohort <- meta_grid$cohorts[[RUN_MANDATE]]
+if (is.null(meta_cohort)) {
+  rlang::abort(sprintf("meta_grid has no '%s' cohort. Present: %s.",
+                       RUN_MANDATE, paste(names(meta_grid$cohorts), collapse = ", ")))
 }
 
 # ---- Human-manager fund benchmarks ----------------------------------------
@@ -133,26 +170,29 @@ compound_daily_returns_15th <- function(daily_data, endpoints) {
   out
 }
 
+# REFINED SAMPLE. The `_refined` exports are the revised universe with
+# feeder/mirror vehicles removed at source, and they are the only ones that
+# reach the local run's evaluation window: the original exports stop at
+# 2024-05-15, while the grid run's index runs to 2026-07-15. Mixing vintages
+# would leave every period after 2024-05 missing and trip the anyNA() check
+# below.
 funds_daily <- read_economatica_daily_returns(
-  here::here("data", "bases_fundos_diarios.xlsx")
+  here::here("data", "bases_fundos_diarios_refined.xlsx")
 )
 ibov_daily <- read_economatica_daily_returns(
-  here::here("data", "ibov_diarios.xlsx")
+  here::here("data", "ibov_diarios_refined.xlsx")
 )
 cdi_daily <- read_economatica_daily_returns(
-  here::here("data", "CDI_diarios.xlsx")
+  here::here("data", "CDI_diarios_refined.xlsx")
 )
 
 # ---- ML backtest window ----------------------------------------------------
 # Established before the fund benchmarks so every daily series can be compounded
 # to the exact monthly endpoints used by the ML backtest.
-meta_port_ind_signals$backtest_meta_portfolios_results$
-  ibov_port_backtest_cohort@port_returns_m_xts_list$net_returns_m_xts <-
-  restore_meta_xts_dates(meta_port_ind_signals$backtest_meta_portfolios_results$
-                           ibov_port_backtest_cohort@port_returns_m_xts_list$net_returns_m_xts)
+meta_cohort@port_returns_m_xts_list$net_returns_m_xts <-
+  restore_meta_xts_dates(meta_cohort@port_returns_m_xts_list$net_returns_m_xts)
 
-ml_index <- meta_port_ind_signals$backtest_meta_portfolios_results$
-  ibov_port_backtest_cohort@port_returns_m_xts_list$net_returns_m_xts@data %>%
+ml_index <- meta_cohort@port_returns_m_xts_list$net_returns_m_xts@data %>%
   zoo::index()
 
 # Geometric monthly returns in percent over (previous 15th, current 15th].
@@ -296,8 +336,7 @@ deduct_management_fee <- function(returns_pct, monthly_fee = mgmt_fee_monthly) {
   ((1 + returns_pct / 100) / (1 + monthly_fee) - 1) * 100
 }
 
-ml_returns_m_xts <- meta_port_ind_signals$backtest_meta_portfolios_results$
-  ibov_port_backtest_cohort@port_returns_m_xts_list$net_returns_m_xts@data
+ml_returns_m_xts <- meta_cohort@port_returns_m_xts_list$net_returns_m_xts@data
 
 # The benchmark column carries no fee; every other column is a portfolio.
 bench_col <- "selected_bench_return"
@@ -447,14 +486,21 @@ writeLines(ensemble_table_tex, here::here("tables", "active_performance.tex"))
 # Same workflow as the ensemble: restore the real dates on the backtest object
 # (mirroring the meta-portfolio treatment above), remove the 1% p.a. fee, then
 # summarize against the run's own benchmark column.
+#
+# Source is the `learners` stage of run_paper_machine.R, which turns each base
+# learner into a cs and an rp portfolio under the ibov mandate using the same
+# paper_meta_port_config() the meta portfolios use -- so these columns are
+# directly comparable to meta_cs_ibov / meta_rp_ibov above. Columns are named
+# learner_<cs|rp>_<config>.
 mb_net_returns_obj <- restore_meta_xts_dates(
-  mb_ind_signals_result$sb_eval_backtest_results_cohort@port_returns_m_xts_list$net_returns_m_xts
+  learners$cohort@port_returns_m_xts_list$net_returns_m_xts
 )
 mb_returns_m_xts <- mb_net_returns_obj@data
 
-# The per-model backtest carries a few extra warm-up months at the start; trim
-# to the ensemble window (ml_index, Dec-2015 .. May-2024) so both tables report
-# the same out-of-sample period.
+# Each learner portfolio starts one period into the base-learner OOS window
+# (initial_buffer_period = 1), which reaches further back than the ensemble's:
+# 133 periods here against ml_index's 128. Trim to ml_index so both tables
+# report the same out-of-sample period.
 stopifnot(all(ml_index %in% zoo::index(mb_returns_m_xts)))
 mb_returns_m_xts <- mb_returns_m_xts[zoo::index(mb_returns_m_xts) %in% ml_index, ]
 stopifnot(nrow(mb_returns_m_xts) == length(ml_index),
@@ -475,10 +521,16 @@ mb_performance <- factoRverse:::summarize_performance(
 )
 
 # Column names carry both the model and the construction scheme, e.g.
-# "c__cs_eval_model_sb_glmnet_bayes_s__..._ind_signals" -> model GLMNET, scheme CS.
-model_from_col  <- function(x) toupper(sub("_bayes$", "",
-                     sub("^c__(?:cs|rp)_eval_model_sb_(.*)_s__.*$", "\\1", x)))
-scheme_from_col <- function(x) toupper(sub("^c__(cs|rp)_.*$", "\\1", x))
+# "c__learner_rp_glmnet_grid_ind_signals_backtest_results_s__..." -> model
+# GLMNET, scheme RP. The config name is set by the `learners` stage; the tuning
+# arm in the middle is `grid` or `bayes` depending on ARM, so strip either.
+model_from_col <- function(x) {
+  x <- sub("^c__learner_(?:cs|rp)_", "", x)          # drop the portfolio wrapper
+  x <- sub("_s__.*$", "", x)                          # drop signals/features tail
+  x <- sub("_ind_signals_backtest_results$", "", x)   # drop the dataset suffix
+  toupper(sub("_(grid|bayes)$", "", x))               # drop the tuning arm
+}
+scheme_from_col <- function(x) toupper(sub("^c__learner_(cs|rp)_.*$", "\\1", x))
 
 model_perf   <- mb_performance$signal_universe_m_d_ref
 model_tbl    <- format_active_rows(model_perf, model_from_col)
@@ -589,11 +641,16 @@ dir.create(here::here("figures"), showWarnings = FALSE)
 # theme, faceted by model (the grid strategy):
 #   * a diverging bar of the summed net importance in the last period;
 #   * a tile heatmap of the summed net importance per theme over time.
-sb_list <- mb_ind_signals_result$chosen_mb_backtest_results_initial@base_sb_backtest_results_list
+sb_list <- mb_grid@base_sb_backtest_results_list
 
 # Compact model label from the backtest element name:
-# "c__glmnet_bayes_f__..._ind_signals" -> "GLMNET"; "c__ols_f__..." -> "OLS".
-fi_model_label <- function(nm) toupper(sub("_bayes$", "", sub("_f__.*$", "", sub("^c__", "", nm))))
+# "c__glmnet_grid_f__..._ind_signals" -> "GLMNET"; "c__ols_f__..." -> "OLS".
+# The tuning arm embedded in the name follows ARM, so accept `grid` as well as
+# `bayes` -- matching only `_bayes$` left the grid run labelled "GLMNET_GRID",
+# which no longer matched fi_model_order and silently emptied those facets.
+fi_model_label <- function(nm) {
+  toupper(sub("_(grid|bayes)$", "", sub("_f__.*$", "", sub("^c__", "", nm))))
+}
 fi_model_order <- c("OLS", "GLMNET", "RF", "XGB", "NN1", "NN2", "NN3")
 
 # Long feature-importance table across all models, themes only (drop the
@@ -831,8 +888,7 @@ plot_composition_grid <- function(pbr_list, variable, value_col = "weights",
 # and by liquidity class (the size proxy). Weights are non-negative, so the
 # 100%-stacked composition is well defined; both the weights and the grouping
 # columns live in the stock universe, so no external join is needed.
-pbr_list <- meta_port_ind_signals$backtest_meta_portfolios_results$
-  ibov_port_backtest_cohort@port_backtest_results_list
+pbr_list <- meta_cohort@port_backtest_results_list
 
 # Largest to smallest, so the legend and stacking read top-down by size.
 liquidity_levels <- c("mega_caps", "large_caps", "mid_caps", "small_caps", "micro_caps")
@@ -894,8 +950,18 @@ writeLines(composition_figures_tex, here::here("figures", "composition_figures.t
 # (sum(eop_port_weights * metric)); the benchmark's weighted version carries a
 # "bench_" prefix and is identical across schemes. One panel per characteristic,
 # one line per ML-ensemble portfolio scheme plus the IBOV benchmark.
+# One metric per factor family: momentum, value, quality, quality, value,
+# low-vol, size, interaction, growth.
+#
+# The growth slot was `fcf_be_12m_chg3y`, which the current metric set no longer
+# produces -- compute_meta_port_metrics() (pipeline R/helpers/
+# backtest_meta_portfolios.R) computes no FCF/BE change variant at all. Its
+# growth block is roe_12m_gr3y / ocf_at_12m_gr3y / gross_mrg_12m_gr3y, so the
+# slot takes roe_12m_gr3y: still a profitability ratio's 3-year change, which
+# keeps the family represented. Say so in the paper rather than presenting it as
+# the original series.
 char_metrics <- c("sharpe_12m", "ni_me", "roe_12m", "gp_at_12m", "div_me_med_36m",
-                  "ret_vol_12m", "log_mkt_cap", "qmj", "fcf_be_12m_chg3y")
+                  "ret_vol_12m", "log_mkt_cap", "qmj", "roe_12m_gr3y")
 
 # Human-readable panel labels (verify against the paper's variable definitions).
 char_labels <- c(
@@ -907,8 +973,25 @@ char_labels <- c(
   ret_vol_12m      = "Return volatility (12m)",
   log_mkt_cap      = "Log market cap (size)",
   qmj              = "Quality minus junk (QMJ)",
-  fcf_be_12m_chg3y = "FCF/BE 3y change"
+  roe_12m_gr3y     = "ROE (3y change)"
 )
+
+# The metric set travels with the pipeline, not with this script, so a renamed
+# or retired feature shows up here as a bare "subscript out of bounds" from
+# inside as.data.frame(). Check the names first and say which ones moved.
+local({
+  have <- colnames(pbr_list[[1]]@port_metrics_m_xts@data)
+  need <- c(char_metrics, paste0("bench_", char_metrics))
+  gone <- setdiff(need, have)
+  if (length(gone) > 0L) {
+    rlang::abort(paste0(
+      "port_metrics_m_xts has no column(s): ", paste(gone, collapse = ", "),
+      ". The run's metric set changed -- see compute_meta_port_metrics() in the ",
+      "pipeline's R/helpers/backtest_meta_portfolios.R for what it now computes, ",
+      "and update char_metrics/char_labels to match."
+    ))
+  }
+})
 
 # Portfolio-weighted characteristics, one row block per scheme.
 char_port <- purrr::imap_dfr(pbr_list, function(pbr, nm) {
@@ -985,8 +1068,9 @@ writeLines(portfolio_characteristics_figures_tex,
 # (style return minus the benchmark), i.e. as an active/tilt return; MKT enters
 # as the benchmark excess over CDI. This is a returns-based style attribution,
 # not a Fama-French risk-premium test: loadings are style tilts and alpha is the
-# active return unexplained by the market + style basis. `signal_ports` must be
-# loaded in the session (it holds the cap-scaled long-only signal portfolios).
+# active return unexplained by the market + style basis. `screen` must be
+# loaded in the session (its $signal_port_cohorts holds the cap-scaled long-only
+# signal portfolios).
 
 # Daily CDI is compounded on the same 15th-to-15th endpoints as every return
 # series in the attribution.
@@ -994,7 +1078,7 @@ cdi <- tibble::tibble(ym = format(ml_index, "%Y-%m"), rf = cdi_ret)
 
 # Long-only factor-mimicking portfolios (net returns, percent).
 sp_returns_obj <- restore_meta_xts_dates(
-  signal_ports$signal_port_backtest_cohort_ind_signals@
+  screen$signal_port_cohorts$signal_port_backtest_cohort_ind_signals@
     port_returns_m_xts_list$net_returns_m_xts
 )
 sp_xts   <- sp_returns_obj@data
@@ -1013,7 +1097,9 @@ factor_mat <- tibble::tibble(
   mom = as.numeric(sp_xts[, fcol("prc_ret_12m_1m")]),     # momentum
   rmw = as.numeric(sp_xts[, fcol("gp_at_12m")]),          # profitability
   smb = as.numeric(sp_xts[, fcol("log_mkt_cap")]),        # size (short large caps)
-  cma = as.numeric(sp_xts[, fcol("assets_gr1y_tr")])      # investment (short high growth)
+  # `assets_gr1y_tr` is not produced by the current gold features; `assets_gr1y`
+  # is the surviving asset-growth signal. Matches build_gap_panel.R's CMA leg.
+  cma = as.numeric(sp_xts[, fcol("assets_gr1y")])         # investment (short high growth)
 ) %>%
   dplyr::left_join(cdi, by = "ym") %>%
   dplyr::transmute(
@@ -1175,7 +1261,7 @@ hfi_top_n    <- 10L
 hfi_subtitle <- "ML Ensemble"   # set to NULL to remove the subtitle entirely
 
 grDevices::pdf(NULL)
-plot(mb_ind_signals_result$chosen_mb_backtest_results_initial,
+plot(mb_grid,
      plot_id = "Hierarchical Feature Importance",
      top_n = hfi_top_n, palette = "journal")
 grDevices::dev.off()
@@ -1184,8 +1270,10 @@ hfi_plot <- ggplot2::last_plot()
 if (!"name" %in% colnames(hfi_plot$data)) {
   rlang::abort("The hierarchical feature-importance graph has no node-name column.")
 }
+# The tuning arm is embedded in the node names ("glmnet_bayes" / "glmnet_grid");
+# strip whichever this run used so the graph labels stay model names.
 hfi_plot$data$name <- gsub(
-  "_bayes",
+  "_(bayes|grid)",
   "",
   as.character(hfi_plot$data$name),
   ignore.case = TRUE
@@ -1391,7 +1479,7 @@ hyperparameters_figure_tex <- latex_figure(
   "hyperparameters_over_time.png",
   "Selected hyperparameters over time.",
   paste(
-    "Bayesian-tuned hyperparameter values chosen at each walk-forward refit, for",
+    "Tuned hyperparameter values chosen at each walk-forward refit, for",
     "every tuned ML model (GLMNET, RF, XGB, NN1--NN3; OLS is untuned and omitted).",
     "Hyperparameters that play the same role across models share a panel and are",
     "drawn as separate coloured lines: number of trees (RF num.trees, XGB nrounds),",
@@ -1556,7 +1644,7 @@ correlogram_plot <- function(long_df, title, ncol = 1L, text_size = 4.4) {
 }
 
 # --- (i) Base-learner prediction agreement ---
-preds_df <- mb_ind_signals_result$chosen_mb_backtest_results_initial@
+preds_df <- mb_grid@
   base_learners_oos_predictions_m_df@data
 pred_cols <- setdiff(colnames(preds_df), c("id", "tickers", "dates", "target", "error"))
 pred_mat  <- as.matrix(preds_df[, pred_cols, drop = FALSE])
@@ -2783,15 +2871,22 @@ spanning_table_tex <- c(
 )
 writeLines(spanning_table_tex, here::here("tables", "spanning_tests.tex"))
 
-# ---- Appendix: Bayesian-optimization search space ---------------------------
+# ---- Appendix: hyperparameter search space ---------------------------------
 # The bounds are READ from the tuning strategies stored with each base learner
 # rather than transcribed by hand, so this table cannot drift from the
 # configuration that was actually run. Every (model, hyperparameter) pair must
 # map to a display row: an unmapped pair aborts instead of being dropped
 # silently, which is what allows the table to stay honest as the config evolves.
+#
+# ARM-AGNOSTIC. A grid run stores a grid_search strategy whose
+# hyperparameter_list holds the full candidate vector per hyperparameter; a
+# Bayesian run stores a two-element [lo, hi] domain. Both are summarised by
+# their min and max, so the table reports the range actually searched either
+# way. Insisting on `bayesian_opt_strategy` here aborted the whole script on the
+# paper's grid run.
 bo_strategies <- purrr::imap(sb_list, function(sbr, nm) {
   ts <- tryCatch(sbr@sb_backtest_config@tuning_strategy, error = function(e) NULL)
-  if (is.null(ts) || !methods::is(ts, "bayesian_opt_strategy")) return(NULL)
+  if (is.null(ts) || !"hyper_grid_domain" %in% methods::slotNames(ts)) return(NULL)
   ts
 })
 names(bo_strategies) <- fi_model_label(names(bo_strategies))
@@ -2799,13 +2894,31 @@ bo_strategies <- purrr::compact(bo_strategies)
 bo_model_order <- intersect(fi_model_order, names(bo_strategies))
 bo_strategies <- bo_strategies[bo_model_order]
 if (length(bo_strategies) == 0L) {
-  rlang::abort("No Bayesian-optimization strategy was found in the base-learner configs.")
+  rlang::abort("No tuning strategy carrying a hyperparameter domain was found in the base-learner configs.")
 }
+
+# Name the arm from the configs rather than assuming it, so the caption cannot
+# describe a Bayesian search for a grid run.
+bo_methods <- unique(vapply(bo_strategies, function(ts) {
+  m <- tryCatch(as.character(ts@tuning_method), error = function(e) NA_character_)
+  if (length(m) != 1L || is.na(m)) "unknown" else m
+}, character(1)))
+bo_arm_label <- if (identical(bo_methods, "grid_search")) {
+  "Grid-search"
+} else if (length(bo_methods) == 1L && grepl("bayes", bo_methods)) {
+  "Bayesian-optimization"
+} else {
+  "Hyperparameter"
+}
+message("Search-space appendix: tuning method(s) = ",
+        paste(bo_methods, collapse = ", "), " -> '", bo_arm_label, "'")
 
 bo_bounds <- purrr::imap_dfr(bo_strategies, function(ts, label) {
   hl <- ts@hyper_grid_domain@hyperparameter_list
   purrr::imap_dfr(hl, function(v, hyper) {
-    if (!is.numeric(v) || length(v) != 2L || anyNA(v)) {
+    # A Bayesian domain is [lo, hi]; a grid is the full candidate vector. Both
+    # reduce to a range, so accept any non-empty numeric.
+    if (!is.numeric(v) || length(v) < 1L || anyNA(v)) {
       rlang::abort(paste0("Unexpected search domain for ", label, "::", hyper, "."))
     }
     tibble::tibble(model = label, hyper = hyper, lo = min(v), hi = max(v))
@@ -2937,6 +3050,36 @@ bo_budget_row <- function(label, field) {
 }
 
 bo_ref <- bo_strategies[[bo_cols[[1]]]]
+
+# Budget rows are arm-specific. `bayesian_opt_strategy` carries init_points /
+# n_iter / acq; `grid_search_strategy` adds NO slots beyond tuning_strategy, so
+# reading those off a grid run errors. A grid search's budget is instead the
+# number of combinations evaluated at each refit -- the product of the candidate
+# counts, which is what run_paper_machine.R reports as "fits/date".
+bo_is_bayes <- identical(bo_arm_label, "Bayesian-optimization")
+
+bo_budget_rows <- if (bo_is_bayes) {
+  c(bo_budget_row("Initial design points", "init_points"),
+    bo_budget_row("Acquisition iterations", "n_iter"))
+} else {
+  paste0("Grid combinations per refit & ",
+         paste(vapply(bo_cols, function(m) {
+           src <- if (m == "NN") bo_nn[[1]] else m
+           hl  <- bo_strategies[[src]]@hyper_grid_domain@hyperparameter_list
+           format(prod(vapply(hl, length, numeric(1))), trim = TRUE)
+         }, character(1)), collapse = " & "),
+         " \\\\")
+}
+
+# Only a Bayesian run has an acquisition function to name.
+bo_note <- sprintf(
+  paste0("\\multicolumn{%d}{@{}p{0.98\\linewidth}@{}}{\\textit{%sObjective: ",
+         "validation %s over a %d-month validation window.}} \\\\"),
+  length(bo_cols) + 1L,
+  if (bo_is_bayes) paste0("Acquisition function: ", toupper(bo_ref@acq), ". ") else "",
+  toupper(bo_ref@chosen_eval_metric), bo_ref@validation_sample_size
+)
+
 bounds_table_tex <- c(
   "\\begin{table}[h]",
   "\\captionsetup{",
@@ -2947,9 +3090,9 @@ bounds_table_tex <- c(
   "}",
   "\\renewcommand{\\arraystretch}{1.25}",
   paste0(
-    "\\caption[Bayesian-optimization search space]",
-    "{\\footnotesize \\textbf{: Bayesian-optimization search space.} Each entry is ",
-    "the closed interval searched for that hyperparameter; \"--\" means the ",
+    "\\caption[", bo_arm_label, " search space]",
+    "{\\footnotesize \\textbf{: ", bo_arm_label, " search space.} Each entry is ",
+    "the range searched for that hyperparameter; \"--\" means the ",
     "hyperparameter does not apply to that model. Bounds are read directly from ",
     "the tuning configuration stored with each fitted base learner, so they ",
     "describe the search that was actually run. Hyperparameters are re-optimized ",
@@ -2962,10 +3105,22 @@ bounds_table_tex <- c(
     "\\texttt{glmnet}'s \\texttt{alpha} and therefore searched over the same ",
     "interval. The penalty path floor is \\texttt{lambda.min.ratio}, the ratio of ",
     "the smallest to the largest $\\lambda^{\\psi}$ on the fitted path, not ",
-    "$\\lambda^{\\psi}$ itself. Integer-valued hyperparameters are searched on the ",
-    "integers within the stated interval. The final rows give the search budget: ",
-    "the size of the initial space-filling design and the number of subsequent ",
-    "acquisition steps, per refit.}"
+    "$\\lambda^{\\psi}$ itself. ",
+    # The last two sentences describe the search budget, which differs by arm --
+    # leaving the Bayesian wording in place made the caption contradict the
+    # "Grid combinations per refit" row on a grid run.
+    if (bo_is_bayes) {
+      paste0("Integer-valued hyperparameters are searched on the integers ",
+             "within the stated interval. The final rows give the search ",
+             "budget: the size of the initial space-filling design and the ",
+             "number of subsequent acquisition steps, per refit.}")
+    } else {
+      paste0("Each hyperparameter is searched over an explicit list of ",
+             "candidate values rather than a continuous interval, so the ",
+             "columns report that list's range. The final row gives the search ",
+             "budget: the number of grid combinations evaluated per refit, ",
+             "i.e.\\ the product of the candidate counts.}")
+    }
   ),
   # \scriptsize, matching every other generated table's body font: at
   # \footnotesize the bracketed intervals wrap mid-cell in the narrower columns.
@@ -2981,16 +3136,9 @@ bounds_table_tex <- c(
   "\\hline",
   bo_table_rows,
   "\\hline",
-  bo_budget_row("Initial design points", "init_points"),
-  bo_budget_row("Acquisition iterations", "n_iter"),
+  bo_budget_rows,
   "\\hline",
-  sprintf(
-    paste0("\\multicolumn{%d}{@{}p{0.98\\linewidth}@{}}{\\textit{Acquisition ",
-           "function: %s. Objective: validation %s over a %d-month validation ",
-           "window.}} \\\\"),
-    length(bo_cols) + 1L, toupper(bo_ref@acq), toupper(bo_ref@chosen_eval_metric),
-    bo_ref@validation_sample_size
-  ),
+  bo_note,
   "\\hline",
   "\\end{tabularx}",
   "\\label{hyperchoice}",

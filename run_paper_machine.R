@@ -51,7 +51,19 @@ PIPELINE_DIR <- file.path(
   "OneDrive - Sicoob", "Renda Variável", "Multifatorial 3.0", "pipeline"
 )
 
-MANIFEST_NAME <- NULL   # NULL = latest dated manifest; or e.g. "manifest_2026_07.qs"
+# PINNED, not NULL. `NULL` resolves to the latest dated manifest in the
+# pipeline's board, which silently changes underneath a partially cached run:
+# the pipeline published manifest_2026_08.qs on 2026-08-15 20:56, after the sb
+# (08-12), meta (08-13) and mb (08-14) stages had already been cached against
+# manifest_2026_07.qs. Any stage added later then loaded 2026-08 gold whose
+# meta-dataframes are stamped current_date 2026-08-15, while the cached backtest
+# objects carry 2026-07-15, and run_port_backtest()'s check_consistent_dates()
+# rejected the mix.
+#
+# This is the vintage the cached artefacts in data/derived/machine_run were
+# actually built from -- provenance.qs records it. Bumping it means re-running
+# every stage from `sb` onward, not just the new ones.
+MANIFEST_NAME <- "manifest_2026_07.qs"
 
 # Python backend -------------------------------------------------------------
 # factoRverse's fit_keras_model() is written against the Keras 2 API, and the
@@ -71,8 +83,8 @@ RETICULATE_PYTHON_OVERRIDE <- NULL
 
 # Stop after this stage. Use "screen" or "probe" for a cheap validation pass
 # before committing to the long ML run.
-#   "screen" | "probe" | "ss" | "sb" | "meta"
-STOP_AFTER <- "meta"
+#   "screen" | "probe" | "ss" | "sb" | "mb" | "meta" | "learners"
+STOP_AFTER <- "learners"
 
 # (a) Signal groups excluded on academic grounds. CLUSTER names as defined in the
 #     pipeline's clusterize_themes.R.
@@ -94,8 +106,20 @@ PROBE_MIN_OBS   <- 24     # floor on candidate window sizes for the probe
 # hyperparameters "based on the MSE in the validation sample", and Hanauer &
 # Kalsbach (2023) optimise over ranges in a validation step -- neither uses
 # Bayesian optimisation. Swap back to the *_bayes names for the BO arm.
-SB_CONFIGS <- c("ols", "glmnet_grid", "rf_grid", "xgb_grid",
-                "nn1_grid", "nn2_grid", "nn3_grid")
+# reticulate cannot rebind Python within a session, so each arm must run in its
+# own R process. PAPER_ARM selects the arm from the environment instead of
+# requiring this line to be edited between runs; unset means the grid arm.
+.ARM_CONFIGS <- list(
+  grid  = c("ols", "glmnet_grid", "rf_grid", "xgb_grid",
+            "nn1_grid", "nn2_grid", "nn3_grid"),
+  bayes = c("ols", "glmnet_bayes", "rf_bayes", "xgb_bayes",
+            "nn1_bayes", "nn2_bayes", "nn3_bayes")
+)
+.paper_arm <- Sys.getenv("PAPER_ARM", "grid")
+if (!.paper_arm %in% names(.ARM_CONFIGS)) {
+  stop("PAPER_ARM must be 'grid' or 'bayes'; got '", .paper_arm, "'.")
+}
+SB_CONFIGS <- .ARM_CONFIGS[[.paper_arm]]
 MB_CONFIG  <- "ew_meta"
 SB_DATASET <- "ind_signals"   # pre-committed; no lockbox spent electing it
 SB_VALIDATION_SAMPLE_SIZE <- 36
@@ -109,6 +133,19 @@ TUNING_PRESET <- "balanced"
 # nn3_bayes -- while nn2_grid uses c(32, 16). TRUE restores the two-layer
 # architecture so the H7 complexity ladder has three distinct NN rungs.
 FIX_NN2_ARCHITECTURE <- TRUE
+
+# Neural-network ensembling (factoRverse >= 0.7.0). A single network fit is one
+# draw from the distribution over networks induced by the random weight
+# initialisation; averaging k independently initialised members cuts that
+# variance component by roughly k. GKX and Hanauer & Kalsbach both average 10,
+# Rubesam 50; 1 reproduces pre-0.7.0 behaviour.
+#
+# Ensembling applies to the REFIT only -- tuning always fits a single network --
+# so the search cost is unchanged and only refits scale with k. An ensemble mean
+# is less dispersed cross-sectionally than a single draw, which would shift
+# weight in an equal-weighted meta-blend; ew_meta sets
+# normalize_base_predictions = TRUE, which is what handles that.
+NN_ENSEMBLES <- 10L
 
 # Grid realignment -----------------------------------------------------------
 #
@@ -170,14 +207,77 @@ GRID_OVERRIDES <- list(
 GRID_OVERRIDES$nn2_grid <- GRID_OVERRIDES$nn1_grid
 GRID_OVERRIDES$nn3_grid <- GRID_OVERRIDES$nn1_grid
 
-# xgb_bayes searches nrounds over c(200, 1000). With early_stop = 25 set on its
-# tuning strategy, the refit does NOT use the tuned nrounds -- it uses
-# optimal_hyper["best_iteration"] (utils-fit_sb_model.R:187). So the upper end of
-# that range costs a great deal of fit time and is then discarded. Measured: xgb
-# spent 6h without finishing the first of 15 rebalance dates, against 1h23m for
-# rf_bayes over all 15. Narrowing the range keeps early stopping in control of the
-# actual round count. Set to NULL to restore production's c(200, 1000).
-XGB_NROUNDS_BOUNDS <- c(200L, 300L)
+# Bayesian-opt constants ------------------------------------------------------
+#
+# factoRverse 0.7.0 allows a hyperparameter to be declared constant under
+# bayesian_opt, which removes it from the Gaussian process's input space
+# instead of leaving it there as a wasted dimension.
+#
+# What the reference studies actually tune (HYPERPARAMETER_GRID_COMPARISON.md):
+#   RF       GKX depth+trees; H&K trees+depth+feature share; Rubesam depth+
+#            features, trees FIXED at 300           -> mtry, max.depth
+#   Boosting GKX/H&K trees+LR+depth; Rubesam iterations+splits, LR FIXED
+#                                                   -> nrounds, eta, max_depth
+#   NN       GKX/H&K l1+LR; Rubesam neither, early stopping only
+#                                                   -> regularizer_l1, lr
+#   Enet     GKX/H&K lambda+alpha                   -> both already searched
+#
+# NO source tunes min.bucket, min_child_weight, subsample, colsample_bytree,
+# alpha/gamma, regularizer_l2, droprate, batch size or epochs; GKX and H&K
+# explicitly FIX batch size and epochs. Each constant below is pinned to the
+# value the grid arm already fixes, so the two arms tune an identical parameter
+# set and the grid-vs-bayes contrast isolates the search method rather than
+# confounding it with a different model class.
+#
+# Secondary effect: the GP is fitted in 2-3 dimensions instead of 4-8. Fitting a
+# surrogate in 8-D from ~48 points is the lengthscale-failure regime recorded in
+# challenger_version4/BAYESIAN_OPT_TRAINING_NOTES.md. gsPoints, which defaults
+# to pmax(100, n_searched^3), drops from 512 to 100 for xgb and 216 to 100 for
+# the NNs. The number of model fits is unchanged -- n_iter governs that.
+#
+# Set to NULL to search every hyperparameter, as before 0.7.0.
+BAYES_CONSTANTS <- list(
+  rf_bayes  = list(num.trees = 500L, min.bucket = 5),
+  xgb_bayes = list(min_child_weight = 1, subsample = 0.8,
+                   colsample_bytree = 0.8, alpha = 0, gamma = 0),
+  nn1_bayes = list(regularizer_l2 = 0, droprate = 0.25,
+                   size_of_batch = 256L, number_of_epochs = 100L)
+)
+# nn2/nn3 pin the same set as nn1.
+BAYES_CONSTANTS$nn2_bayes <- BAYES_CONSTANTS$nn1_bayes
+BAYES_CONSTANTS$nn3_bayes <- BAYES_CONSTANTS$nn1_bayes
+
+# Bayes bounds
+BAYES_BOUNDS <- list(
+  nn1_bayes = list(
+    regularizer_l1 = c(1e-5, 1e-3),
+    lr             = c(1e-3, 1e-1)
+  )
+)
+
+BAYES_BOUNDS$nn2_bayes <- BAYES_BOUNDS$nn1_bayes
+BAYES_BOUNDS$nn3_bayes <- BAYES_BOUNDS$nn1_bayes
+
+# A pinned entry is list(distribution_choice = "constant", value = <scalar>);
+# a searched one is a length-2 numeric c(lower, upper).
+.is_bayes_constant <- function(h) {
+  is.list(h) && identical(h$distribution_choice, "constant")
+}
+
+# xgb_bayes searches nrounds over c(200, 1000) upstream. With early_stop = 25 on
+# its tuning strategy the refit does NOT use the tuned nrounds -- it uses
+# optimal_hyper["best_iteration"] (utils-fit_sb_model.R:187) -- and the grid
+# arm's checkpoint measured best_iteration at 3-130 against caps of 100-500, so
+# nrounds is non-binding in practice.
+#
+# This was previously narrowed to c(200, 300) purely to cut the cost of an
+# 8-dimensional search (xgb spent 6h without finishing the first of 15 rebalance
+# dates, against 1h23m for rf_bayes over all 15). BAYES_CONSTANTS now pins five
+# of those eight, so that cost pressure is gone. The bound is instead matched to
+# the span the grid arm enumerates -- {100, 250, 500} -- so both arms search the
+# same nrounds range and differ only in HOW they search it.
+# Set to NULL to restore production's c(200, 1000).
+XGB_NROUNDS_BOUNDS <- c(100L, 500L)
 
 # The paper's machine predicts cumulative 3m active return, not the geometric
 # mean. gold_aux ships the geometric target; the cumulative one is derived.
@@ -294,6 +394,16 @@ if (!is.na(.py) && nzchar(.py) && file.exists(.py)) {
 library(dplyr)
 library(factoRverse)
 
+# NN_ENSEMBLES and BAYES_CONSTANTS both use API introduced in 0.7.0 -- the
+# n_ensembles slot and constant hyperparameters under bayesian_opt. On an older
+# build the constant declaration fails validObject() with a message about bounds
+# that gives no hint of the real cause, so fail here instead, with one.
+if (utils::packageVersion("factoRverse") < "0.7.0") {
+  stop("This script needs factoRverse >= 0.7.0 (installed: ",
+       utils::packageVersion("factoRverse"), "). Set NN_ENSEMBLES <- 1L and ",
+       "BAYES_CONSTANTS <- NULL to run it against an older build.")
+}
+
 # Source the pipeline's helper layer only. R/deploy and R/tests are deliberately
 # NOT sourced: they pin to the production board and run deploy-time suites.
 invisible(lapply(
@@ -304,7 +414,7 @@ invisible(lapply(
 
 `%||%` <- function(x, y) if (is.null(x)) y else x
 
-STAGES <- c("screen", "probe", "ss", "sb", "mb", "meta")
+STAGES <- c("screen", "probe", "ss", "sb", "mb", "meta", "learners")
 stopifnot(STOP_AFTER %in% STAGES)
 
 
@@ -398,6 +508,20 @@ patch_sb_configs <- function(cfgs, training_sample_size = NULL,
       message("  nn2_bayes: architecture set to units = c(32, 16)")
     }
 
+    # NN ensembling -- see NN_ENSEMBLES. Placed after the nn2 repair so the
+    # rebuilt architecture carries it too (add_keras_architecture() defaults
+    # n_ensembles to 1 when the argument is absent). Refit-only: tuning always
+    # fits a single network, so the search cost is unchanged.
+    if (NN_ENSEMBLES > 1L && identical(cfg@sb_algorithm, "nn")) {
+      kap <- cfg@keras_architecture_parameters
+      if (is.null(kap)) {
+        stop(nm, " is an nn config but carries no keras_architecture_parameters.")
+      }
+      kap@n_ensembles <- as.numeric(NN_ENSEMBLES)
+      cfg@keras_architecture_parameters <- kap
+      message(sprintf("  %-13s n_ensembles -> %d", nm, NN_ENSEMBLES))
+    }
+
     # Retarget every base learner. create_sb_configs hardcodes
     # target_fwd_name = "fwd_act_geom_mean_ret_3m" on all of them
     # (backtest_base_signal_blending.R:951+), with no argument to override it.
@@ -450,12 +574,64 @@ patch_sb_configs <- function(cfgs, training_sample_size = NULL,
       message(sprintf("  %-13s grid realigned | fits/date %3.0f -> %3.0f", nm, before, after))
     }
 
+    # Pin the hyperparameters no reference study tunes -- see BAYES_CONSTANTS.
+    # Applied BEFORE the budget block so the init_points guard below sees the
+    # searched dimension, and before the nrounds block, which touches a
+    # searched parameter and so cannot collide with anything pinned here.
+    if (!is.null(BAYES_CONSTANTS) && !is.null(BAYES_CONSTANTS[[nm]])) {
+      tsc <- cfg@tuning_strategy
+      if (is.null(tsc) || !identical(tsc@tuning_method, "bayesian_opt")) {
+        stop("BAYES_CONSTANTS names '", nm, "' but it is not a bayesian_opt config.")
+      }
+      hgc <- tsc@hyper_grid_domain
+      hlc <- hgc@hyperparameter_list
+      pin <- BAYES_CONSTANTS[[nm]]
+      unknown <- setdiff(names(pin), names(hlc))
+      if (length(unknown) > 0) {
+        stop("BAYES_CONSTANTS[['", nm, "']] names hyperparameters absent from ",
+             "the config: ", paste(unknown, collapse = ", "))
+      }
+      for (h in names(pin)) {
+        hlc[[h]] <- list(distribution_choice = "constant", value = pin[[h]])
+      }
+      hgc@hyperparameter_list <- hlc
+      tsc@hyper_grid_domain   <- hgc
+      cfg@tuning_strategy     <- tsc
+      searched <- names(hlc)[!vapply(hlc, .is_bayes_constant, logical(1))]
+      message(sprintf("  %-13s pinned %d | searches %d: %s", nm,
+                      length(pin), length(searched),
+                      paste(searched, collapse = ", ")))
+    }
+    
+    if (!is.null(BAYES_BOUNDS[[nm]])) {
+      ts  <- cfg@tuning_strategy
+      hgd <- ts@hyper_grid_domain
+      new <- BAYES_BOUNDS[[nm]]
+      
+      unknown <- setdiff(names(new), names(hgd@hyperparameter_list))
+      if (length(unknown) > 0) {
+        stop("BAYES_BOUNDS[['", nm, "']] has unknown hyperparameters: ",
+             paste(unknown, collapse = ", "))
+      }
+      
+      for (h in names(new)) {
+        hgd@hyperparameter_list[[h]] <- new[[h]]
+      }
+      
+      ts@hyper_grid_domain <- hgd
+      cfg@tuning_strategy  <- ts
+    }
+
     ts <- cfg@tuning_strategy
     if (!is.null(ts) && identical(ts@tuning_method, "bayesian_opt") &&
         !is.null(budgets[[nm]])) {
 
       b     <- budgets[[nm]]
-      n_dim <- length(ts@hyper_grid_domain@hyperparameter_list)
+      # 0.7.0 requires init_points to exceed the number of SEARCHED
+      # hyperparameters, not the number declared, so pinned constants must
+      # not count towards it. BAYES_CONSTANTS is applied just above.
+      n_dim <- sum(!vapply(ts@hyper_grid_domain@hyperparameter_list,
+                           .is_bayes_constant, logical(1)))
 
       if (b[["init_points"]] <= n_dim) {
         stop("init_points (", b[["init_points"]], ") must exceed the ", n_dim,
@@ -563,6 +739,53 @@ git_hash_of <- function(dir) {
                      stdout = TRUE, stderr = FALSE), silent = TRUE)
   if (inherits(out, "try-error") || length(out) == 0) NA_character_ else out[1]
 }
+
+# Pre-flight: can the pipeline actually DISPATCH every config in SB_CONFIGS?
+#
+# The pipeline keeps three lists that must agree -- the config builders, the
+# allowable-config check, and `sb_registry` (the dispatch table in
+# run_all_sb_backtests). Only sb_registry is hand-maintained. A config missing
+# from it is still built and still passes the allowable check, and is then
+# skipped by the run loop with NO backtest and NO log line. That is not
+# hypothetical: with the pipeline checked out at a commit lacking the nn*_grid
+# entries, a grid run fitted ols/glmnet/rf/xgb over ~64 minutes and only failed
+# at the very end, on the base-learner count, with nothing in the log to say the
+# three NN models had never run.
+#
+# Checked here against the pipeline SOURCE rather than a branch name, so this
+# stays correct wherever the fix lives. Costs about a second.
+local({
+  reg_file <- file.path(PIPELINE_DIR, "R", "helpers",
+                        "backtest_base_signal_blending.R")
+  if (!file.exists(reg_file)) {
+    warning("Pipeline backtest helper not found; dispatch pre-flight skipped.")
+    return(invisible(NULL))
+  }
+  pat        <- 'list\\(\\s*name\\s*=\\s*"'
+  src        <- readLines(reg_file, warn = FALSE)
+  registered <- unique(sub(paste0(".*", pat, '([^"]+)".*'), "\\1",
+                           grep(pat, src, value = TRUE)))
+  if (length(registered) == 0L) {
+    # Formatting drifted past the pattern. Warn rather than block: a guard that
+    # cannot read the registry must not stop a run that would otherwise work.
+    warning("Could not parse sb_registry from ", basename(reg_file),
+            "; dispatch pre-flight skipped.")
+    return(invisible(NULL))
+  }
+  missing <- setdiff(SB_CONFIGS, registered)
+  if (length(missing) > 0L) {
+    stop("The pipeline cannot dispatch: ", paste(missing, collapse = ", "),
+         "\n  pipeline : ", PIPELINE_DIR,
+         "\n  at commit: ", git_hash_of(PIPELINE_DIR),
+         "\n  These configs would be built, silently skipped, and the run would",
+         " fail only after every other model had been fitted.",
+         "\n  The nn*_grid registry entries live in commit 712b7bd",
+         " (merged to pipeline main on 2026-08-12).", call. = FALSE)
+  }
+  message(sprintf("Pipeline dispatch OK: %d/%d configs registered (%s @ %s)",
+                  length(SB_CONFIGS), length(SB_CONFIGS),
+                  basename(PIPELINE_DIR), git_hash_of(PIPELINE_DIR)))
+})
 
 # The manifest records pin locations as paths RELATIVE to the pipeline root
 # (versions_table$latest_version = "data/prod/<pin>/<version>", and
@@ -736,7 +959,7 @@ main <- function() {
   message("tuning arm: ", ARM)
 
   stage_path <- function(name) {
-    suffix <- if (name %in% c("sb", "mb", "meta")) paste0("_", ARM) else ""
+    suffix <- if (name %in% c("sb", "mb", "meta", "learners")) paste0("_", ARM) else ""
     file.path(OUT_DIR, paste0(name, suffix, ".qs"))
   }
 
@@ -1170,8 +1393,22 @@ main <- function() {
       parallel                        = FALSE   # ML stage: keep deterministic
     )
 
-    # Assertion 1: no model was trained on anything but ind_signals.
-    trained_on <- unique(unlist(lapply(base$base_sb_backtest_results_lists, names)))
+    # The per-model pipeline checkpoint is shared by the grid and Bayes arms.
+    # It returns every completed learner, although this arm must feed only its
+    # pre-committed configs into the equal-weighted meta-blend.
+    base_results <- base$base_sb_backtest_results_lists
+    base_config_names <- stringr::str_remove(
+      names(base_results), "_backtest_results_list$"
+    )
+    missing_base_configs <- setdiff(SB_CONFIGS, base_config_names)
+    if (length(missing_base_configs) > 0L) {
+      stop("Checkpoint is missing required ", ARM, " base learner(s): ",
+           paste(missing_base_configs, collapse = ", "))
+    }
+    base_results <- base_results[base_config_names %in% SB_CONFIGS]
+
+    # Assertion 1: no selected model was trained on anything but ind_signals.
+    trained_on <- unique(unlist(lapply(base_results, names)))
     if (!identical(sort(trained_on), SB_DATASET)) {
       stop("Base learners were trained on datasets {",
            paste(trained_on, collapse = ", "), "}; expected only '",
@@ -1179,7 +1416,7 @@ main <- function() {
     }
 
     # Flatten to the naming evaluate_sb_configs() would have produced.
-    elected <- purrr::imap(base$base_sb_backtest_results_lists,
+    elected <- purrr::imap(base_results,
                            function(sublist, model_name) {
       clean <- stringr::str_remove(model_name, "_backtest_results_list$")
       obj   <- sublist[[SB_DATASET]]
@@ -1204,6 +1441,7 @@ main <- function() {
     # Record the tuning actually used, per learner, for the methods appendix.
     tuning_used <- purrr::imap_dfr(base$base_sb_configs_list, function(cfg, nm) {
       if (!methods::is(cfg, "sb_backtest_config")) return(NULL)
+      if (!cfg@config_name %in% SB_CONFIGS) return(NULL)
       ts <- cfg@tuning_strategy
       if (is.null(ts) || !identical(ts@tuning_method, "bayesian_opt")) return(NULL)
       tibble::tibble(
@@ -1372,7 +1610,14 @@ main <- function() {
     cfg
   }
 
-  meta <- run_stage("meta", {
+  # Shared OOS input preparation for the two portfolio stages.
+  #
+  # `meta` and `learners` build portfolios over the same base-learner OOS window
+  # from the same gold panels. run_stage() caches by file, so on a re-run where
+  # meta_<arm>.qs already exists the meta stage body never executes and its
+  # locals do not exist -- `learners` therefore cannot borrow them and must
+  # rebuild the inputs itself. Extracted here so the two stages cannot drift.
+  prepare_oos_port_inputs <- function() {
 
     base_oos_dates <- mb@base_learners_oos_predictions_m_df@data %>%
       pull(dates) %>% unique() %>% sort()
@@ -1449,6 +1694,33 @@ main <- function() {
       pregold_m_df = pregold_m_df, gold_dates = base_oos_dates
     )
 
+    list(base_oos_dates = base_oos_dates, meta_oos_dates = meta_oos_dates,
+         meta_buffer = meta_buffer, aux = aux, subset_dates = subset_dates,
+         gold = oos_gold, bench_w = oos_bench_w, liquidity = oos_liquidity,
+         volatility = oos_volatility, fwd_1m = oos_fwd_1m, sectors = oos_sectors,
+         daily_stocks = daily_stocks, daily_bench = daily_bench,
+         ret_indexes = ret_indexes, port_metrics = oos_port_metrics)
+  }
+
+  meta <- run_stage("meta", {
+
+    inp <- prepare_oos_port_inputs()
+    base_oos_dates   <- inp$base_oos_dates
+    meta_oos_dates   <- inp$meta_oos_dates
+    meta_buffer      <- inp$meta_buffer
+    aux              <- inp$aux
+    subset_dates     <- inp$subset_dates
+    oos_gold         <- inp$gold
+    oos_bench_w      <- inp$bench_w
+    oos_liquidity    <- inp$liquidity
+    oos_volatility   <- inp$volatility
+    oos_fwd_1m       <- inp$fwd_1m
+    oos_sectors      <- inp$sectors
+    daily_stocks     <- inp$daily_stocks
+    daily_bench      <- inp$daily_bench
+    ret_indexes      <- inp$ret_indexes
+    oos_port_metrics <- inp$port_metrics
+
     results <- list()
     for (mandate_name in names(META_MANDATES)) {
       mandate <- META_MANDATES[[mandate_name]]
@@ -1500,6 +1772,119 @@ main <- function() {
          meta_oos_dates = meta_oos_dates, buffer = meta_buffer)
   })
 
+  if (stop_here("meta")) {
+    return(invisible(list(screen = screen, probe = probe, ss = ss, sb = sb,
+                          mb = mb, meta = meta)))
+  }
+
+  # ---- 8b. INDIVIDUAL BASE-LEARNER PORTFOLIOS ------------------------------
+  #
+  # The `meta` stage turns the ENSEMBLE into portfolios. This stage does the
+  # same for each base learner on its own, so the paper can ask whether the
+  # ensemble is doing work that any single model already does -- the H7
+  # "systematisation, not machine learning" exhibit.
+  #
+  # Follows the pipeline's evaluate_sb_configs.R (R/helpers), which builds a
+  # cap-scaled (cs) and a risk-parity (rp) portfolio per candidate config. Two
+  # deliberate departures from that reference:
+  #
+  #   * The configs come from paper_meta_port_config() rather than being
+  #     hand-rolled. The paper's ibov mandate already carries the reference's
+  #     eligibility_quantile_range = c(0.67, 1) and selected_benchmark =
+  #     "ibov", but going through the paper helper ALSO inherits its covariance
+  #     estimator for rp, its transaction-cost parameters and its manifest
+  #     liquidity cutoffs. Without that the learner portfolios would not be
+  #     comparable to meta_cs_ibov / meta_rp_ibov, which is the only comparison
+  #     this stage exists to support.
+  #
+  #   * initial_buffer_period = 1, not the meta stage's meta_buffer. That
+  #     buffer exists because the meta learner spends the first periods of the
+  #     base-learner OOS panel training, so it has no predictions there. A base
+  #     learner has predictions for every date in base_oos_dates by
+  #     construction -- the window is DEFINED as its own OOS panel -- so there
+  #     is nothing to skip.
+  #
+  # Scope is ibov only. The exhibit compares MODELS, not mandates; running all
+  # four mandates would be 56 backtests instead of 14 to answer a question
+  # nobody asked of it.
+  LEARNER_PORT_CONFIGS <- c("cs", "rp")
+
+  learners <- run_stage("learners", {
+
+    inp <- prepare_oos_port_inputs()
+    base_oos_dates <- inp$base_oos_dates
+
+    mandate_name <- "ibov"
+    mandate      <- META_MANDATES[[mandate_name]]
+    if (!is.null(mandate$and_rule)) {
+      stop("The learners stage assumes the ibov mandate has no AND rule.")
+    }
+
+    elected <- sb$elected
+    message("Base learners to evaluate: ", length(elected), " (",
+            paste(names(elected), collapse = ", "), ")")
+
+    # The gold panels are loaded live from the pipeline board; the base learners
+    # come out of a cached stage. When those two vintages diverge,
+    # run_port_backtest() rejects the mix inside check_consistent_dates() with a
+    # bare "Inconsistent current_date values" and no hint about which side
+    # moved. Fail here instead, naming the knob that fixes it.
+    gold_cd    <- inp$gold@current_date
+    learner_cd <- elected[[1L]]@oos_sb_outputs_m_df@current_date
+    if (!identical(gold_cd, learner_cd)) {
+      stop("Vintage mismatch: gold panels are stamped ", format(gold_cd),
+           " but the cached base learners are stamped ", format(learner_cd),
+           ". MANIFEST_NAME (", if (is.null(MANIFEST_NAME)) "NULL = latest"
+           else MANIFEST_NAME, ") does not match the manifest sb_", ARM,
+           ".qs was built from -- see provenance.qs$manifest. Pin MANIFEST_NAME",
+           " to that vintage, or re-run every stage from `sb` onward.")
+    }
+
+    results <- list()
+    for (learner_name in names(elected)) {
+      for (port_name in LEARNER_PORT_CONFIGS) {
+        key <- paste0("learner_", port_name, "_", learner_name)
+        message("  running ", key)
+
+        cfg <- paper_meta_port_config(mandate_name, mandate, port_name,
+                                      initial_buffer = 1L)
+        # Rename for traceability and uniqueness -- paper_meta_port_config()
+        # names it meta_<port>_<mandate>, which would collide across learners
+        # and read as an ensemble portfolio in every downstream table.
+        cfg@config_name <- key
+
+        set.seed(SEED)
+        results[[key]] <- factoRverse::run_port_backtest(
+          signals_m_df                = inp$gold,
+          fwd_return_m_df             = inp$fwd_1m,
+          liquidity_m_df              = inp$liquidity,
+          volatility_m_df             = inp$volatility,
+          config                      = cfg,
+          benchmark_weights_m_df      = inp$bench_w,
+          benchmark_returns_m_xts     = inp$ret_indexes,
+          daily_stock_returns_m_xts   = inp$daily_stocks,
+          daily_bench_returns_m_xts   = inp$daily_bench,
+          stock_groups_m_df           = inp$sectors,
+          custom_stock_metrics_m_df   = inp$port_metrics,
+          sb_backtest_results         = elected[[learner_name]],
+          user_defined_AND_rules_m_df = NULL,
+          scaler_m_df                 = NULL,   # scaler off; see USE_SCALER
+          verbose                     = TRUE,
+          parallel                    = FALSE
+        )
+      }
+    }
+
+    cohort <- factoRverse::create_port_backtest_cohort(
+      results, cohort_name = "learner_cohort"
+    )
+
+    list(results = results, cohort = cohort,
+         port_configs = LEARNER_PORT_CONFIGS,
+         learners = names(elected), mandate = mandate_name,
+         oos_dates = base_oos_dates)
+  })
+
   # ---- 9. PROVENANCE -------------------------------------------------------
 
   provenance <- list(
@@ -1531,6 +1916,9 @@ main <- function() {
     meta_oos_dates         = meta$oos_dates,
     meta_learner_oos_dates = meta$meta_oos_dates,
     meta_port_buffer       = meta$buffer,
+    learner_port_configs   = LEARNER_PORT_CONFIGS,
+    learner_mandate        = learners$mandate,
+    learner_names          = learners$learners,
     session                = utils::sessionInfo()
   )
   qs::qsave(provenance, file.path(OUT_DIR, "provenance.qs"))
