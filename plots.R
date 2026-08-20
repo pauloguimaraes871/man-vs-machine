@@ -612,7 +612,8 @@ journal_area_theme <- function(base_size = plot_base_size) {
 # No float number is emitted: LaTeX auto-numbers the float, and a hard-coded
 # number in the optional (list-of-figures) argument silently goes stale whenever
 # floats are reordered. The short caption is the title instead.
-latex_figure <- function(file, bold_title, body, label, fig_dir = "figures") {
+latex_figure <- function(file, bold_title, body, label, fig_dir = "figures",
+                         include_options = "width=\\linewidth") {
   c(
     "\\begin{figure}[htbp]",
     "\\centering",
@@ -624,7 +625,7 @@ latex_figure <- function(file, bold_title, body, label, fig_dir = "figures") {
     "}",
     sprintf("\\caption[%s]{\\footnotesize \\textbf{: %s} %s}",
             bold_title, bold_title, body),
-    sprintf("\\includegraphics[width=\\linewidth]{%s/%s}", fig_dir, file),
+    sprintf("\\includegraphics[%s]{%s/%s}", include_options, fig_dir, file),
     sprintf("\\label{%s}", label),
     "\\end{figure}"
   )
@@ -663,22 +664,32 @@ plot(
 bh_eligibility_plot <- ggplot2::last_plot()
 grDevices::dev.off()
 
+bh_eligibility_plot <- bh_eligibility_plot +
+  ggplot2::labs(
+    title = "Signal eligibility through time",
+    subtitle = "Annual Benjamini--Hochberg screens; all signals",
+    x = "Screening date",
+    y = "Signals",
+    fill = "Eligibility"
+  )
+
 ggplot2::ggsave(
   here::here("figures", "bh_eligibility_heatmap.png"),
   bh_eligibility_plot,
-  width = 14, height = 10, dpi = 300, bg = "white"
+  width = 10, height = 18, dpi = 300, bg = "white"
 )
 
 bh_eligibility_figure_tex <- latex_figure(
   "bh_eligibility_heatmap.png",
   "Signal eligibility under the Benjamini--Hochberg adjustment.",
   paste(
-    "Each row is an individual non-sector characteristic and each column is an",
+    "Each row is an individual non-sector signal and each column is an",
     "annual screening date. Tiles identify characteristics selected by the 5\\%",
     "Benjamini--Hochberg procedure using an expanding 81-month initial estimation",
     "window. All available characteristics and screening dates are shown."
   ),
-  "fig:bh_eligibility"
+  "fig:bh_eligibility",
+  include_options = "width=0.70\\linewidth,height=0.90\\textheight,keepaspectratio"
 )
 writeLines(
   bh_eligibility_figure_tex,

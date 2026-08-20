@@ -201,9 +201,7 @@ To ensure that the portfolios remain implementable, the liquidity screen retains
    
 We reinforced point-in-time information by comparing the publication date of each statement with each respective date, and relabeled each ticker with its respective CVM code, thus ensuring adequate computation of features that require time-series information. After cleaning and pre-processing, a total of $N = 50,309$ observations were used for training, validation, and testing.
 
-Although feature selection is already implemented by some of the algorithms used and despite the fact that many of the most-famous anomalies have already been published before the beginning of our sample, we implemented an additional remedy for selection bias. Each of the $J$ characteristics are embedded in cap-scaled portfolios and then, in a consistent walk-forward scheme, net-of-cost returns are tested for significantly positive alphas after adjusting for multiple testing with the Benjamini-Hochberg procedure. The first screen uses an 81-month expanding estimation window. Figure~\ref{fig:bh_eligibility} shows eligibility for all screened characteristics and dates.
-
-\input{../figures/bh_eligibility_figure.tex}
+Although feature selection is already implemented by some of the algorithms used and despite the fact that many of the most-famous anomalies have already been published before the beginning of our sample, we implemented an additional remedy for selection bias. Each of the $J$ characteristics are embedded in cap-scaled portfolios and then, in a consistent walk-forward scheme, net-of-cost returns are tested for significantly positive alphas after adjusting for multiple testing with the Benjamini-Hochberg procedure. The first screen uses an 81-month expanding estimation window. Figure~\ref{fig:bh_eligibility}, presented with the other figures at the end of the manuscript, shows eligibility for all screened signals and dates.
 
 
 \subsection{Choosing $g()$}
@@ -470,9 +468,11 @@ Various methods, including linear combinations and stacked ensembles, can be use
 
 \subsection{ML Portfolios}
 
-ML expected returns were used as inputs to build portfolios and backtest investment strategies. All portfolios used these forecasts to form investable sets, selecting the quartile of stocks $s = 1, \ldots, S$ with the highest forecast, thus reducing dimensionality for portfolio allocation \citep{coqueretguida2020}. 
+ML forecasts define the eligible universe as the upper prediction quantile range. For the Ibovespa mandate, this is the top tercile, $[0.67,1]$, rather than a quartile. Portfolio backtests begin in November 2015 and rebalance in February, April, May, August, and November. We compare three heuristic allocations (EW, SW, and CS), risk parity (RP), box-constrained risk parity (RP\_BOX), hierarchical risk parity (HRP), mean--tracking-error optimization (MVO), and its constrained counterpart (MVO\_BOX). The portfolio methods are summarized here; implementation details are reported in Appendix~\ref{app:algorithmic}.
 
-Each portfolio started in February 2016, the first out-of-sample month, considering training and validation sample sizes. Rebalancing occurred in March, April, May, August, and November to balance the trade-off between new accounting information and turnover. A 7 bps direct transaction cost was assumed, with market impact costs estimated using Barra's square root model \citep{barra1997}. Buffering was applied to reduce turnover, and stocks with benchmark weights greater than 0.03 were also included in the investable set to reduce tracking error.
+All covariance-based allocations use a 126-trading-day covariance matrix of active stock returns relative to the mandate benchmark, estimated by constant-correlation shrinkage \citep{ledoitwolf2003,ledoitwolf2004}. MVO uses 50 resamples with perturbations to expected-return scores and covariance eigenvalues to reduce sensitivity to input uncertainty \citep{michaud1989}. All portfolio combinations apply the same liquidity floor and transaction-cost specification: 7 bps direct cost, R\$150 million strategy AUM, square-root market impact ($\alpha=0.5$), and dynamic impact scaling. RP\_BOX imposes a 5\% absolute active-weight limit. MVO\_BOX retains that 5\% limit and additionally applies a 10\% quantile-range buffer and turnover caps of 1\% for micro-caps and 2.5\% for small-caps.
+
+\iffalse
 
 
 \subsubsection{Heuristic Portfolios}
@@ -568,6 +568,8 @@ Therefore, a constrained MTO\_CON version was also explored, with box, turnover,
 
 Additionally, for stocks with volatility in 95, 97,5 and 99 quantiles, max active weights were multiplied by 0.75, 0.50 or 0, respectively. 
 
+\fi
+
 \section{Results}
 In this section, results on ML models' out-of-sample predictive performance and portfolio performance are presented.
 
@@ -593,7 +595,7 @@ Overall, among 39 most important features, there were 8 in Value (47\%), 6 in Mo
 
 
 \subsection{ML Portfolios Performance}
-As mentioned, portfolios used the equal-weighted all-model ensemble as the expected-returns model, due to its superiority in $R^{2}_{OOS}$. At total, 13 portfolio schemes were used: 4 heuristics (EW, CW, CS, SW), 3 RP, 3 MTO\_UNC and 3 MTO\_CON, each using $\widehat{\Sigma}_{SAM, t}$, $\widehat{\Sigma}_{PCA, t}$ or $\widehat{\Sigma}_{S, t}$.
+As mentioned, portfolios used the equal-weighted all-model ensemble as the expected-returns model, due to its superiority in $R^{2}_{OOS}$. We evaluate eight portfolio-construction schemes: EW, SW, CS, RP, RP\_BOX, HRP, MVO, and MVO\_BOX. The covariance-based schemes use the common constant-correlation shrinkage estimator described in Appendix~\ref{app:algorithmic}.
 
 To assess out-of-sample ML performance, the cap-weighted IBOV index was used as the equity benchmark and the CDI as the risk-free benchmark. Fund, IBOV and CDI daily simple returns were geometrically compounded over each interval from the day after the previous calendar 15th through the current calendar 15th, matching the ML backtest endpoints.
 
@@ -740,6 +742,14 @@ NN1 has one hidden layer with 32 units; NN2 has layers with 32 and 16 units; and
 
 The cross-model ensemble forecast is the equal-weighted mean of its constituent forecasts and is distinct from the within-architecture averaging of independently initialized neural networks. Feature interpretation is based exclusively on the GSM: at each refit, a linear surrogate is fitted to a model's predictions using the full characteristic set, and its normalized coefficients provide a common approximation of the prediction function across model classes. We do not use native coefficient magnitudes or tree split gains as reported importance measures.
 
+\subsection{Portfolio Construction}
+
+At each rebalance, the forecast determines the eligible assets through the mandate-specific upper prediction quantile range; for the Ibovespa mandate, the range $[0.67,1]$ retains the top tercile. EW assigns equal weights, SW scales weights by the standardized forecast, and CS combines standardized forecasts with capitalization. RP and RP\_BOX are computed with the native risk-parity formulation in the \texttt{riskParityPortfolio} package. HRP follows \citet{lopezdeprado2016}: it hierarchically clusters the covariance-derived distance matrix, quasi-diagonalizes the asset ordering, and recursively allocates capital across clusters.
+
+For RP, HRP, and MVO, the covariance input is the 126-trading-day active-return covariance matrix relative to the selected benchmark. It is estimated by linear shrinkage toward a constant-correlation target \citep{ledoitwolf2003,ledoitwolf2004}. MVO searches 1,000 sampled random portfolios for the maximum active Sharpe ratio. The procedure is repeated over 50 resamples, jittering expected-return scores by 0.5 and covariance eigenvalues by 0.25, and averages across the resulting solutions. This resampling addresses the sensitivity of mean--variance allocations to estimated inputs \citep{michaud1989}.
+
+All portfolio configurations apply the same micro-cap liquidity floor and the same cost model: a 7 bps direct trading cost, strategy AUM of R\$150 million, square-root impact with $\alpha=0.5$, and dynamic $\lambda$. RP\_BOX applies $|w_i-w_{b,i}|\leq 0.05$. MVO\_BOX applies the same active-weight limit, retains a 10\% quantile-range buffer, and caps turnover at 1\% for micro-caps and 2.5\% for small-caps. These constraints are part of the MVO\_BOX implementation, not generic restrictions imposed on every portfolio.
+
     \section{Tables and Figures}
 
 \begin{table}[t]
@@ -786,6 +796,8 @@ ENS & 21.91 & 15.53 & 14.63 & 7.77 & 1.83 & 0.0003 \\
 
 
 \input{../figures/hyperparameters_over_time_figure.tex}
+
+\input{../figures/bh_eligibility_figure.tex}
 
 \input{../figures/feature_importance_figures.tex}
 
