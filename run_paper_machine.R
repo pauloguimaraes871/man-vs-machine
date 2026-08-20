@@ -120,6 +120,69 @@ if (!.paper_arm %in% names(.ARM_CONFIGS)) {
   stop("PAPER_ARM must be 'grid' or 'bayes'; got '", .paper_arm, "'.")
 }
 SB_CONFIGS <- .ARM_CONFIGS[[.paper_arm]]
+
+# (c2) TUNING-METRIC ARM -- robustness, orthogonal to the grid/bayes arm.
+#
+# Motivation. `rmse` scores the whole cross-section, but the strategy only
+# trades one tercile of it, and the two disagree: across the seven learners the
+# rank correlation between full-sample OOS RMSE and realised portfolio Sharpe is
+# +0.11 (CS) / +0.18 (RP) -- near zero and the WRONG sign. See
+# ML_MODEL_DIAGNOSTICS.md S4 for the evidence.
+#
+# What each arm changes, and what it deliberately does NOT:
+#
+#   mpe   pinball (quantile) loss. calculate_eval_metrics() computes
+#           mean(ifelse(error >= 0, tau * error, (1 - tau) * (-error)))
+#         with error = target - pred, so `error >= 0` is UNDER-prediction and
+#         takes weight tau. At tau = 0.67 under-prediction is penalised 0.67
+#         against 0.33, the fitted object is the 67th conditional quantile, and
+#         predictions shift up.
+#
+#         CAVEAT worth keeping in view when reading the results: because the
+#         portfolio uses only the cross-sectional RANKING, a uniform upward
+#         shift changes nothing. The ranking moves only where the shift is
+#         UNEVEN -- i.e. where conditional variance differs across stocks. So
+#         tau > 0.5 is substantially a VOLATILITY TILT, pushing high-dispersion
+#         names up the ranking. That may be desirable, but it is not the same
+#         mechanism as "care more about the stocks actually bought", and the
+#         paper should not describe it as tail-focus.
+#
+#   mphe  pseudo-Huber, delta = 1. A SYMMETRIC robust loss: it downweights
+#         outliers relative to squared error but still scores the whole
+#         distribution evenly. It tests outlier sensitivity, not tail focus.
+#
+# CRITICAL: only `chosen_eval_metric` moves. `custom_objective` stays
+# "squared_error" for every learner, so training is bit-identical across arms
+# and the ONLY thing that changes is which hyperparameters win at each refit.
+# That isolation is the point -- it is what makes the comparison attributable.
+# Training on pseudo-Huber or pinball directly (xgb and nn1-nn3 both support it)
+# is a separate, larger experiment; do not fold it in here.
+#
+# OLS is untuned and has no tuning_strategy, so it is bit-identical across all
+# three arms. It is therefore a free control: if the OLS portfolio moves between
+# arms, that is a plumbing bug, not a finding.
+#
+# quantile_tau feeds `mpe` only; huber_delta feeds `mphe` only. Both are set on
+# every arm so the config carries the value that was actually in force.
+.EVAL_METRIC_ARMS <- list(
+  rmse = list(metric = "rmse", tau = 0.5,  delta = 1),
+  mpe  = list(metric = "mpe",  tau = 0.67, delta = 1),
+  mphe = list(metric = "mphe", tau = 0.5,  delta = 1)
+)
+.paper_eval <- Sys.getenv("PAPER_EVAL_METRIC", "rmse")
+if (!.paper_eval %in% names(.EVAL_METRIC_ARMS)) {
+  stop("PAPER_EVAL_METRIC must be one of ",
+       paste(names(.EVAL_METRIC_ARMS), collapse = ", "),
+       "; got '", .paper_eval, "'.")
+}
+EVAL_METRIC <- .EVAL_METRIC_ARMS[[.paper_eval]]$metric
+EVAL_TAU    <- .EVAL_METRIC_ARMS[[.paper_eval]]$tau
+EVAL_DELTA  <- .EVAL_METRIC_ARMS[[.paper_eval]]$delta
+# Empty for the baseline so existing artefacts keep their current filenames and
+# are NOT invalidated: sb_grid.qs stays sb_grid.qs, and the mpe/mphe arms write
+# alongside as sb_grid_mpe.qs / sb_grid_mphe.qs.
+EVAL_TAG <- if (identical(.paper_eval, "rmse")) "" else paste0("_", .paper_eval)
+
 MB_CONFIG  <- "ew_meta"
 SB_DATASET <- "ind_signals"   # pre-committed; no lockbox spent electing it
 SB_VALIDATION_SAMPLE_SIZE <- 36
@@ -551,6 +614,37 @@ patch_sb_configs <- function(cfgs, training_sample_size = NULL,
       }
     }
 
+    # Tuning-metric arm -- see .EVAL_METRIC_ARMS. Applied to every tuned config
+    # regardless of tuning_method, so the grid and bayes arms can each be run
+    # under any metric. `custom_objective` is intentionally untouched.
+    {
+      tsm <- cfg@tuning_strategy
+      if (!is.null(tsm) && !identical(tsm@chosen_eval_metric, EVAL_METRIC)) {
+        message(sprintf("  %-13s chosen_eval_metric: %s -> %s",
+                        nm, tsm@chosen_eval_metric, EVAL_METRIC))
+        tsm@chosen_eval_metric <- EVAL_METRIC
+        cfg@tuning_strategy    <- tsm
+      }
+      # Set on the config even when unchanged: quantile_tau and huber_delta are
+      # read by calculate_eval_metrics() at scoring time, so the value stored
+      # here is the one the reported metric was computed under.
+      if (!identical(cfg@quantile_tau, EVAL_TAU)) {
+        message(sprintf("  %-13s quantile_tau: %s -> %s",
+                        nm, cfg@quantile_tau, EVAL_TAU))
+        cfg@quantile_tau <- EVAL_TAU
+      }
+      if (!identical(cfg@huber_delta, EVAL_DELTA)) {
+        message(sprintf("  %-13s huber_delta: %s -> %s",
+                        nm, cfg@huber_delta, EVAL_DELTA))
+        cfg@huber_delta <- EVAL_DELTA
+      }
+      if (!identical(cfg@custom_objective, "squared_error")) {
+        stop("Config '", nm, "' has custom_objective = '", cfg@custom_objective,
+             "'. The tuning-metric arms change SELECTION only; a non-squared ",
+             "training objective would confound the comparison.")
+      }
+    }
+
     # Grid realignment -- see GRID_OVERRIDES.
     if (!is.null(GRID_OVERRIDES) && !is.null(GRID_OVERRIDES[[nm]])) {
       tsg <- cfg@tuning_strategy
@@ -956,10 +1050,19 @@ main <- function() {
     stop("SB_CONFIGS mixes _grid and _bayes learners; the arm is ambiguous and the ",
          "two tuning methods would not be comparable across the H7 ladder.")
   }
-  message("tuning arm: ", ARM)
+  # The tuning-metric arm is a SECOND, orthogonal dimension. ARM_TAG is what
+  # names artefacts: "grid", "grid_mpe", "grid_mphe", "bayes", ... The baseline
+  # tag is empty so existing sb_grid.qs / mb_grid.qs / meta_grid.qs keep their
+  # names and remain valid; the metric arms write alongside rather than over.
+  ARM_TAG <- paste0(ARM, EVAL_TAG)
+  message("tuning arm: ", ARM, " | eval metric: ", EVAL_METRIC,
+          if (identical(EVAL_METRIC, "mpe")) paste0(" (tau = ", EVAL_TAU, ")")
+          else if (identical(EVAL_METRIC, "mphe")) paste0(" (delta = ", EVAL_DELTA, ")")
+          else "",
+          " | artefact tag: ", ARM_TAG)
 
   stage_path <- function(name) {
-    suffix <- if (name %in% c("sb", "mb", "meta", "learners")) paste0("_", ARM) else ""
+    suffix <- if (name %in% c("sb", "mb", "meta", "learners")) paste0("_", ARM_TAG) else ""
     file.path(OUT_DIR, paste0(name, suffix, ".qs"))
   }
 
@@ -1348,19 +1451,47 @@ main <- function() {
                         "backtest_base_signal_blending_checkpoint",
                         paste0("backtest_base_signal_blending_checkpoint_",
                                gold_signals_m_df@current_date, ".qs"))
+  #
+  # THE SAME HAZARD APPLIES TO THE TUNING METRIC, and is worse because it is
+  # invisible. The checkpoint path is keyed on the gold vintage ALONE -- not on
+  # the arm and not on the metric -- while the config names inside it
+  # ("glmnet_grid", ...) are identical across metric arms. Running the mpe arm
+  # against a checkpoint left by the rmse arm would therefore skip every model
+  # and hand back rmse-tuned learners wearing an mpe label: the experiment would
+  # silently measure nothing. The target check below cannot catch it, because
+  # target_fwd_name is the same in both arms.
   if (!file.exists(stage_path("sb")) && file.exists(.sb_ckpt)) {
-    stale <- tryCatch({
+    probe <- tryCatch({
       chk <- qs::qread(.sb_ckpt)
-      tg  <- unique(unlist(rapply(chk$data, function(x) {
-        if (methods::is(x, "sb_backtest_results")) x@sb_backtest_config@target_fwd_name
-        else NULL
+      pull <- function(f) unique(unlist(rapply(chk$data, function(x) {
+        if (methods::is(x, "sb_backtest_results")) f(x) else NULL
       }, how = "unlist")))
-      length(tg) > 0 && !all(tg == ML_TARGET)
-    }, error = function(e) TRUE)   # unreadable/unknown shape: treat as stale
-    if (isTRUE(stale)) {
+      list(
+        target = pull(function(x) x@sb_backtest_config@target_fwd_name),
+        metric = pull(function(x) {
+          ts <- x@sb_backtest_config@tuning_strategy
+          if (is.null(ts)) NULL else ts@chosen_eval_metric   # OLS is untuned
+        })
+      )
+    }, error = function(e) NULL)
+
+    if (is.null(probe)) {
+      stop("Unreadable SB checkpoint at\n  ", .sb_ckpt,
+           "\nIt cannot be verified against this run and would be silently ",
+           "reused. Delete it and re-run.")
+    }
+    if (length(probe$target) > 0 && !all(probe$target == ML_TARGET)) {
       stop("Stale SB checkpoint at\n  ", .sb_ckpt,
            "\nIt holds models trained on a different target than ML_TARGET ('",
            ML_TARGET, "'), and would be silently reused. Delete it and re-run.")
+    }
+    if (length(probe$metric) > 0 && !all(probe$metric == EVAL_METRIC)) {
+      stop("SB checkpoint metric mismatch at\n  ", .sb_ckpt,
+           "\nIt holds models tuned on '", paste(probe$metric, collapse = "', '"),
+           "' but this run requests PAPER_EVAL_METRIC = '", EVAL_METRIC, "'.",
+           "\nThe checkpoint is keyed on the gold vintage only, so those models",
+           " would be skipped and reused, and the arm would silently measure",
+           " nothing. Delete the checkpoint (or move it aside) and re-run.")
     }
   }
 
@@ -1835,7 +1966,7 @@ main <- function() {
       stop("Vintage mismatch: gold panels are stamped ", format(gold_cd),
            " but the cached base learners are stamped ", format(learner_cd),
            ". MANIFEST_NAME (", if (is.null(MANIFEST_NAME)) "NULL = latest"
-           else MANIFEST_NAME, ") does not match the manifest sb_", ARM,
+           else MANIFEST_NAME, ") does not match the manifest sb_", ARM_TAG,
            ".qs was built from -- see provenance.qs$manifest. Pin MANIFEST_NAME",
            " to that vintage, or re-run every stage from `sb` onward.")
     }
@@ -1903,6 +2034,10 @@ main <- function() {
     sb_configs             = SB_CONFIGS,
     sb_dataset             = SB_DATASET,
     tuning_arm             = ARM,
+    tuning_eval_metric     = EVAL_METRIC,
+    tuning_quantile_tau    = EVAL_TAU,
+    tuning_huber_delta     = EVAL_DELTA,
+    artefact_tag           = ARM_TAG,
     tuning_preset          = TUNING_PRESET,
     tuning_used            = sb$tuning_used,
     grid_overrides         = GRID_OVERRIDES,
@@ -1921,7 +2056,10 @@ main <- function() {
     learner_names          = learners$learners,
     session                = utils::sessionInfo()
   )
-  qs::qsave(provenance, file.path(OUT_DIR, "provenance.qs"))
+  # Tagged like the stage artefacts, so a metric arm does not overwrite the
+  # baseline's provenance record. The untagged name stays the baseline's.
+  qs::qsave(provenance,
+            file.path(OUT_DIR, paste0("provenance", EVAL_TAG, ".qs")))
 
   message("\nDone. Outputs in ", OUT_DIR)
   invisible(list(screen = screen, probe = probe, ss = ss, sb = sb,
