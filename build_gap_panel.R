@@ -1404,8 +1404,36 @@ rolling_risk_adjusted <- function(ret_mat, ret_ym, factor_mat,
 # if the gap against OLS matches the gap against NN3, the story is
 # systematisation, not machine learning.
 # -----------------------------------------------------------------------------
+#
+# Trailing realised volatility of a return series, using the `window` months
+# STRICTLY BEFORE t and never t itself. The exclusion is deliberate and matches
+# rolling_rho_machine()'s reasoning: a single large market move at t would
+# otherwise raise both the volatility measure and the cross-sectional dispersion
+# the gap is drawn from, manufacturing an association. A t-1 window is also what
+# an investor actually knows entering period t, so the regime is implementable
+# rather than hindsight.
+MKT_VOL_WINDOW <- 12L
+
+trailing_sd_prior <- function(x, window = MKT_VOL_WINDOW) {
+  vapply(seq_along(x), function(i) {
+    lo <- i - window
+    if (lo < 1L) return(NA_real_)
+    v <- x[lo:(i - 1L)]
+    if (sum(!is.na(v)) < window) NA_real_ else stats::sd(v, na.rm = TRUE)
+  }, numeric(1))
+}
+
+# `bench_cols` is OPTIONAL and, when supplied, is a second mandate-keyed lookup
+# naming each mandate's BENCHMARK INDEX column (bench_ibov / bench_smll / ...)
+# rather than its machine column. It exists only to carry `mkt_ret` -- the
+# market return that mandate's funds were actually swimming in -- out to the
+# panel, so analysis_gap.R can condition the gap on the market state. It is a
+# Group C (ENVIRONMENT) variable in the taxonomy at the top of this file:
+# common to every fund in a mandate at t, therefore absorbed by time FE and
+# never a fund-level control. NULL leaves `mkt_ret` all-NA, which is what the
+# unit tests pass (their synthetic ml_ret_mat has no bench_* columns).
 build_dv <- function(fund_ret_mat, ml_ret_mat, period, factor_mat,
-                     ml_cols, fund_mandate,
+                     ml_cols, fund_mandate, bench_cols = NULL,
                      factor_ym = if (inherits(period, "Date")) {
                        format(period, "%Y-%m")
                      } else {
@@ -1442,6 +1470,23 @@ build_dv <- function(fund_ret_mat, ml_ret_mat, period, factor_mat,
     rlang::abort(sprintf("Mandate(s) with no benchmark column: %s.",
                          paste(unknown, collapse = ", ")))
   }
+  if (!is.null(bench_cols)) {
+    if (is.null(names(bench_cols)) || anyNA(bench_cols) || anyDuplicated(bench_cols)) {
+      rlang::abort("bench_cols must be a named, unique, mandate-keyed character vector.")
+    }
+    # Every mandate that produces a gap must also produce a market return, or
+    # the regime analysis would silently drop an arm.
+    if (!all(names(ml_cols) %in% names(bench_cols))) {
+      rlang::abort(sprintf("bench_cols is missing mandate(s): %s.",
+                           paste(setdiff(names(ml_cols), names(bench_cols)),
+                                 collapse = ", ")))
+    }
+    missing_bench <- setdiff(bench_cols, colnames(ml_ret_mat))
+    if (length(missing_bench) > 0L) {
+      rlang::abort(sprintf("Benchmark index column(s) absent from ml_ret_mat: %s.",
+                           paste(missing_bench, collapse = ", ")))
+    }
+  }
 
   fund_ra <- rolling_risk_adjusted(fund_ret_mat, factor_ym, factor_mat, window, min_obs)
 
@@ -1464,6 +1509,42 @@ build_dv <- function(fund_ret_mat, ml_ret_mat, period, factor_mat,
         dplyr::mutate(period = period) %>%
         tidyr::pivot_longer(-period, names_to = "ml_benchmark", values_to = "r_ml"),
       by = c("period", "ml_benchmark")
+    ) %>%
+    # MARKET RETURN for the fund's own mandate (Group C). Keyed on mandate, not
+    # on ml_benchmark, because the benchmark index is a property of the
+    # universe, not of which construction scheme the machine used.
+    dplyr::left_join(
+      if (is.null(bench_cols)) {
+        tibble::tibble(period = period[0L], mandate = character(0L),
+                       mkt_ret = numeric(0L), mkt_vol = numeric(0L))
+      } else {
+        bench_m <- ml_ret_mat[, unname(bench_cols), drop = FALSE]
+        # Trailing realised volatility, computed HERE rather than in
+        # analysis_gap.R because `period` at this point is the FULL ML index
+        # (2015-06 onward) while the gap itself does not exist until the
+        # 36-month beta window fills. Computing it downstream would burn a
+        # second 12-month window off the front of the estimation sample and
+        # throw away ~13% of it, including the whole pre-COVID baseline.
+        vol_m <- apply(bench_m, 2L, trailing_sd_prior, window = MKT_VOL_WINDOW)
+        colnames(vol_m) <- colnames(bench_m)
+
+        long_of <- function(m, value_name) {
+          tibble::as_tibble(m) %>%
+            dplyr::mutate(period = period) %>%
+            tidyr::pivot_longer(-period, names_to = "bench_col",
+                                values_to = value_name)
+        }
+        long_of(bench_m, "mkt_ret") %>%
+          dplyr::left_join(long_of(vol_m, "mkt_vol"),
+                           by = c("period", "bench_col")) %>%
+          dplyr::left_join(
+            tibble::tibble(mandate = names(bench_cols),
+                           bench_col = unname(bench_cols)),
+            by = "bench_col"
+          ) %>%
+          dplyr::select(period, mandate, mkt_ret, mkt_vol)
+      },
+      by = c("period", "mandate")
     )
 
   tibble::as_tibble(fund_ra$ra) %>%
@@ -1853,8 +1934,16 @@ build_gap_dv <- function(daily, ml_index, codes, static,
 
   factor_mat <- build_factor_mat(ml_index, cdi_daily)
 
+  # read_ml_returns() renames each cohort's `selected_bench_return` to
+  # "bench_<mandate>", so the benchmark index series are already in `ml_m` and
+  # only need to be named. Built from names(ml_cols) rather than by grepping
+  # colnames(), so a mandate that somehow lost its benchmark column aborts in
+  # build_dv() instead of silently dropping out of the regime analysis.
+  bench_cols <- stats::setNames(paste0("bench_", names(ml_cols)), names(ml_cols))
+
   gap <- build_dv(fund_m, ml_m, ml_index, factor_mat,
-                  ml_cols = ml_cols, fund_mandate = fund_mandate)
+                  ml_cols = ml_cols, fund_mandate = fund_mandate,
+                  bench_cols = bench_cols)
 
   # Mediator, not a control (see the taxonomy at the top of this file). Computed
   # per mandate: rho against the wrong mandate's machine would measure universe

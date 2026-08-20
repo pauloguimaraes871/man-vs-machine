@@ -113,6 +113,48 @@ lump_levels <- function(x, n = 6L, other = "Other") {
   factor(ifelse(x %in% keep, x, other))
 }
 
+# -----------------------------------------------------------------------------
+# Named crisis windows for the Brazilian equity market.
+#
+# These are EVENT windows, not a data-driven regime split: the dates are fixed
+# ex ante from the historical record, never chosen by looking at the gap. That
+# distinction matters -- a drawdown-threshold rule fitted on this sample would
+# select periods partly on the DV and manufacture its own result. The continuous
+# `mkt_ret` / `bear` terms cover ordinary beta-like state dependence; these
+# dummies cover named liquidity-and-uncertainty episodes, which is a different
+# question.
+#
+# Windows are closed on both ends and matched on the panel's 15th-to-15th
+# period stamp, so a period is labelled by the month its return window ENDS.
+# Overlaps are impossible by construction (the windows are disjoint); the
+# `dplyr::case_when` order is therefore documentation, not precedence.
+CRISIS_WINDOWS <- list(
+  # Dilma impeachment, the 2015-16 recession and the Lava Jato escalation.
+  impeachment = c("2015-04-15", "2016-08-15"),
+  # Greve dos Caminhoneiros: the nationwide truckers' strike froze logistics
+  # and hit domestic equities hard over roughly six weeks.
+  truckers    = c("2018-05-15", "2018-06-15"),
+  # COVID crash and the recovery leg through year-end.
+  covid       = c("2020-02-15", "2020-12-15"),
+  # Selic tightening cycle: 2.00% to 13.75%, a sustained de-rating of equities.
+  ratehike    = c("2021-03-15", "2022-08-15")
+)
+
+regime_label <- function(period) {
+  p   <- as.Date(period)
+  out <- rep("normal", length(p))
+  for (nm in names(CRISIS_WINDOWS)) {
+    w   <- as.Date(CRISIS_WINDOWS[[nm]])
+    hit <- !is.na(p) & p >= w[1L] & p <= w[2L]
+    if (any(out[hit] != "normal")) {
+      rlang::abort(sprintf("Crisis window '%s' overlaps an earlier window.", nm))
+    }
+    out[hit] <- nm
+  }
+  # "normal" first so it is the reference level every dummy is read against.
+  factor(out, levels = c("normal", names(CRISIS_WINDOWS)))
+}
+
 est <- s5 %>%
   dplyr::mutate(
     period_f  = factor(period),
@@ -130,8 +172,93 @@ est <- s5 %>%
     bank      = as.integer(bank_affiliated),
     efpc      = as.integer(efpc),
     retail    = as.integer(investor_type == "Geral"),
-    anbima_f  = lump_levels(anbima_class)
+    anbima_f  = lump_levels(anbima_class),
+    # ---- Market state (Group C: ENVIRONMENT) --------------------------------
+    # `mkt_ret` is the fund's OWN mandate's benchmark index return, carried out
+    # of build_gap_panel.R. Common to every fund in a mandate at t, so time FE
+    # absorb it entirely: these terms are identified in Spec 3 (no time FE)
+    # only, which is exactly why Spec 3 exists as a separate specification
+    # rather than as extra columns on Spec 2.
+    bear      = as.integer(mkt_ret < 0),
+    # droplevels() is load-bearing. CRISIS_WINDOWS is defined over the full
+    # historical record, but the estimation sample starts well after the
+    # earliest window (the 36-month trailing beta burn-in eats the first three
+    # years). A retained-but-empty level yields an all-zero dummy column, which
+    # makes crossprod(X) singular and fails inside the two-way vcov's chol()
+    # with an error that names a column index and nothing else.
+    crisis_f  = droplevels(regime_label(period))
   )
+
+# Say plainly which named windows the sample can actually speak to. A crisis
+# dummy that silently vanished would otherwise look like a null result.
+local({
+  present <- levels(est$crisis_f)
+  absent  <- setdiff(names(CRISIS_WINDOWS), present)
+  rlang::inform(sprintf(
+    "Estimation sample spans %s to %s.\n  Crisis windows IN sample: %s.\n  Crisis windows OUT of sample (no rows, dropped): %s.",
+    min(est$period), max(est$period),
+    if (length(setdiff(present, "normal"))) paste(setdiff(present, "normal"), collapse = ", ") else "none",
+    if (length(absent)) paste(absent, collapse = ", ") else "none"))
+})
+
+# -----------------------------------------------------------------------------
+# Market VOLATILITY REGIME (Group C) -- the primary regime definition.
+#
+# `mkt_vol` arrives from build_gap_panel.R as the trailing 12-month standard
+# deviation of the mandate's own benchmark return, computed strictly through
+# t-1 (see MKT_VOL_WINDOW / trailing_sd_prior there for why t is excluded, and
+# why it is computed upstream where the full ML index is still in scope).
+#
+# `vol_rel` divides by the mandate's OWN full-sample mean, so 1.0 reads as
+# "typical volatility for this universe" and SMLL's structurally higher
+# volatility does not masquerade as a permanent high-volatility regime.
+#
+# NOTE ON THE FULL-SAMPLE MEAN. For a CONTINUOUS term this is harmless: it is
+# division by a constant, so the coefficient rescales and the t-statistic is
+# numerically identical to one on raw mkt_vol. It matters for the REGIME
+# CUTS below, whose boundaries genuinely use full-sample information. The
+# volatility regime is therefore a descriptive classification, not a tradeable
+# timing rule, and the paper must not present it as one.
+#
+# Two cuts are built because they answer different questions:
+#   vol_regime_f  terciles of vol_rel within mandate -- balanced cells, no
+#                 arbitrary threshold, and the form used in the regression;
+#   high_vol      a single split at the full-sample mean -- the literal
+#                 "above or below normal volatility" reading, kept for the
+#                 descriptive table where a two-way split is what a reader wants.
+vol_tab <- est %>%
+  dplyr::distinct(mandate, period, mkt_vol) %>%
+  dplyr::group_by(mandate) %>%
+  dplyr::mutate(
+    vol_rel     = mkt_vol / mean(mkt_vol, na.rm = TRUE),
+    high_vol    = as.integer(vol_rel > 1),
+    vol_tercile = dplyr::if_else(is.na(vol_rel), NA_integer_,
+                                 dplyr::ntile(vol_rel, 3))
+  ) %>%
+  dplyr::ungroup() %>%
+  dplyr::mutate(
+    # "mid" is the reference level, so LOW and HIGH each read as a deviation
+    # from ordinary market conditions rather than from the calmest third.
+    vol_regime_f = factor(dplyr::case_when(vol_tercile == 1L ~ "vol_low",
+                                           vol_tercile == 3L ~ "vol_high",
+                                           !is.na(vol_tercile) ~ "vol_mid"),
+                          levels = c("vol_mid", "vol_low", "vol_high"))
+  ) %>%
+  dplyr::select(mandate, period, vol_rel, high_vol, vol_tercile, vol_regime_f)
+
+est <- dplyr::left_join(est, vol_tab, by = c("mandate", "period"))
+
+local({
+  v <- vol_tab[!is.na(vol_tab$vol_rel), ]
+  rlang::inform(sprintf(
+    "Market volatility regime: %d of %d mandate-periods defined (first %s).\n  vol_rel range %.2f-%.2f | terciles: %s",
+    nrow(v), nrow(vol_tab),
+    if (nrow(v)) as.character(min(v$period)) else "n/a",
+    if (nrow(v)) min(v$vol_rel) else NA_real_,
+    if (nrow(v)) max(v$vol_rel) else NA_real_,
+    paste(sprintf("%s=%d", levels(v$vol_regime_f),
+                  as.integer(table(v$vol_regime_f))), collapse = ", ")))
+})
 
 readr_write <- function(tbl, file) {
   utils::write.csv(tbl, file.path(TAB_DIR, file), row.names = FALSE)
@@ -271,6 +398,47 @@ tidy_clustered <- function(fit, c1, c2, keep_pattern = NULL) {
   out
 }
 
+# Fit with every RHS column -- continuous AND dummy, including FE indicators --
+# centered at its in-sample mean, so the intercept reads as "the DV at average
+# sample characteristics" rather than at log_pl_fundo = log_pl_gestora =
+# expense_ratio = ... = 0, a fund that does not exist and is nowhere near the
+# data. Centering a design that includes an intercept is a pure
+# reparametrisation: coefficients, fitted values and residuals on every other
+# term are IDENTICAL to the uncentered fit (verified 2026-08-19 against the
+# unconditional mean gap_raw, which the centered intercept must recover and
+# does: 0.503 vs 0.503). Only the intercept -- and hence its clustered SE --
+# differs, which is exactly the number that was misleading: reported
+# uncentered, Spec 1's gap_raw intercept was 0.03 (se 0.48, p = 0.95) and read
+# as "no alpha after controlling for costs." It was never alpha; it was a
+# linear extrapolation to a zero-everything fund. Centered, it is 0.50 (p =
+# 0.001), matching the unconditional mean gap_raw exactly.
+lm_centered <- function(formula, data) {
+  mf <- stats::model.frame(formula, data, na.action = stats::na.omit)
+  y  <- stats::model.response(mf)
+  X  <- stats::model.matrix(formula, mf)
+  is_int <- colnames(X) == "(Intercept)"
+  X[, !is_int] <- scale(X[, !is_int, drop = FALSE], center = TRUE, scale = FALSE)
+
+  df <- as.data.frame(X[, !is_int, drop = FALSE], check.names = FALSE)
+  # model.matrix() column names for a Date-valued factor (period_f) contain
+  # hyphens ("period_f2016-01-15"), not valid as bare data.frame/formula names.
+  # make.names() only mangles what follows the "period_f" prefix, so the
+  # downstream `!grepl("^period_f", term)` filter in run_specs() still matches.
+  colnames(df) <- make.names(colnames(df), unique = TRUE)
+  df$.y <- y
+
+  fit <- stats::lm(stats::reformulate(setdiff(colnames(df), ".y"), response = ".y"),
+                   data = df)
+  # vcov_twoway() reads stats::na.action(fit) to align the (fund, period)
+  # cluster vectors -- taken from the full `est` frame -- with the model
+  # matrix. Fitting on the pre-NA-dropped `df` above means lm() itself has
+  # nothing left to omit, so na.action(fit) would come back NULL and the
+  # alignment step would silently no-op. Reattach what model.frame() actually
+  # dropped so that alignment still happens.
+  fit$na.action <- attr(mf, "na.action")
+  fit
+}
+
 
 # =============================================================================
 # 3. Regressions
@@ -318,8 +486,8 @@ run_specs <- function(dv) {
   f1 <- stats::as.formula(paste(dv, "~", paste(rhs_fe, collapse = " + ")))
   f2 <- stats::as.formula(paste(dv, "~", paste(c(rhs_fe, "period_f"), collapse = " + ")))
 
-  m1 <- stats::lm(f1, data = est)
-  m2 <- stats::lm(f2, data = est)
+  m1 <- lm_centered(f1, est)
+  m2 <- lm_centered(f2, est)
 
   t1 <- tidy_clustered(m1, est$code, est$period)
   # Time-FE coefficients are nuisance parameters; drop them from the report.
@@ -334,11 +502,76 @@ run_specs <- function(dv) {
     dplyr::mutate(dv = dv, .before = 1)
 }
 
+# -----------------------------------------------------------------------------
+# Spec 3 -- MARKET STATE. Group C in the panel taxonomy: `mkt_ret`, `bear` and
+# the crisis dummies are common to every fund in a mandate at t, so Spec 2's
+# time FE absorb them completely and they can only be identified WITHOUT time
+# FE. That is the whole reason this is a third specification instead of extra
+# columns on Spec 2.
+#
+# Everything from rhs_fe is retained, so the market-state coefficients are read
+# holding the fund traits fixed. Centering applies here too, which matters more
+# than usual: with `bear` and the crisis dummies uncentered, the intercept would
+# be "the gap for an average fund in a NON-crisis UP month", not the sample
+# average, and would not be comparable to Spec 1's.
+#
+# `mkt_ret` and `bear` are deliberately BOTH included. `mkt_ret` picks up smooth
+# beta-like state dependence; `bear` picks up an asymmetry at zero that a linear
+# term cannot represent. They are correlated but not collinear, and dropping
+# either one changes the question rather than tightening the answer.
+# Spec 3 (direction + crisis) and Spec 4 (adds volatility) are kept SEPARATE
+# rather than merged, and the reason is sample loss, not taste. `vol_rel` needs
+# 12 complete prior months, and the estimation sample starts 2019-01, so the
+# volatility term is undefined until 2020-02. Folding it into Spec 3 would cost
+# ~11% of rows AND the entire pre-COVID baseline -- which is precisely the
+# comparison the COVID dummy is measured against. Merged, the COVID coefficient
+# degrades from t = -2.59 to t = -2.25 on gap_raw for no analytical gain.
+#
+# `high_vol` is deliberately NOT in either regression: it is a coarsening of
+# `vol_rel`, and including both would split one effect across two near-collinear
+# terms. The dummy earns its keep in the descriptive cell means below.
+rhs_regime <- drop_degenerate(c("mkt_ret", "bear"), est)
+if (dplyr::n_distinct(est$crisis_f) > 1L) rhs_regime <- c(rhs_regime, "crisis_f")
+# Volatility enters Spec 4 as the REGIME FACTOR (vol_low / vol_high against the
+# vol_mid reference), not as the continuous vol_rel: the question is whether the
+# gap differs by volatility regime, and a factor answers it without imposing
+# linearity in volatility -- which the tercile means below give no reason to
+# assume.
+rhs_vol <- if (dplyr::n_distinct(est$vol_regime_f[!is.na(est$vol_regime_f)]) > 1L) {
+  "vol_regime_f"
+} else character(0)
+
+run_regime_spec <- function(dv, extra = character(0), spec = "Spec 3") {
+  terms <- c(rhs_regime, extra)
+  if (length(terms) == 0L) return(NULL)
+  f3 <- stats::as.formula(
+    paste(dv, "~", paste(c(rhs_fe, terms), collapse = " + "))
+  )
+  m3 <- lm_centered(f3, est)
+  # `n` is reported because these specs drop any row with a missing regime
+  # variable and so need not run on exactly the Spec 1/2 sample. Spec 3 should
+  # match Spec 1 (mkt_ret is complete); Spec 4 is expected to be smaller.
+  tidy_clustered(m3, est$code, est$period) %>%
+    dplyr::transmute(spec = spec, dv = dv, term, estimate, std_error, t, p,
+                     n = stats::nobs(m3))
+}
+
+regime_reg <- dplyr::bind_rows(
+  purrr::map_dfr(c("gap", "gap_raw"), run_regime_spec),
+  if (length(rhs_vol)) {
+    purrr::map_dfr(c("gap", "gap_raw"), run_regime_spec,
+                   extra = rhs_vol, spec = "Spec 4")
+  }
+)
+
 reg_out <- purrr::map_dfr(c("gap", "gap_raw"), run_specs)
 readr_write(reg_out, "gap_regressions.csv")
 for (d in c("gap", "gap_raw")) {
   cat("\n=== DV =", d,
-      "| Spec 1 (no time FE) / Spec 2 (time FE), two-way clustered ===\n")
+      "| Spec 1 (no time FE) / Spec 2 (time FE), two-way clustered ===\n",
+      "    (RHS centered at sample means: (Intercept) = DV at an AVERAGE",
+      "fund/gestora, not an all-zero one; all other coefficients unchanged",
+      "by centering)\n")
   print(as.data.frame(dplyr::select(dplyr::filter(reg_out, dv == d), -dv)), digits = 3)
 }
 
@@ -361,6 +594,121 @@ uncond <- purrr::map_dfr(c("pooled", ML_MANDATES), function(arm_lbl) {
 readr_write(uncond, "gap_unconditional.csv")
 cat("\n=== Unconditional gap (pp/month), two-way clustered ===\n")
 print(as.data.frame(uncond), digits = 3)
+
+
+# =============================================================================
+# 3b. Regime analysis
+# =============================================================================
+# Two cuts of the same question, both descriptive-then-conditional:
+#   (i)  UP vs DOWN months, plus terciles of the market return -- ordinary
+#        state dependence, and the test of whether the gap is a disguised
+#        beta bet that only pays in rising markets;
+#   (ii) named crisis windows -- whether the machine's edge survives episodes
+#        where discretionary managers claim their advantage lies.
+#
+# Both are reported on the SAME estimation sample and with the same two-way
+# clustering as the headline, so the numbers are directly comparable to the
+# unconditional table above.
+
+# Cell means with clustered SEs, so a "the machine wins in both regimes" claim
+# carries an inference and not just two point estimates.
+regime_cell <- function(d, label_col, label_val) {
+  purrr::map_dfr(c("gap", "gap_raw"), function(dv) {
+    fit <- stats::lm(stats::as.formula(paste(dv, "~ 1")), data = d)
+    tidy_clustered(fit, d$code, d$period) %>%
+      dplyr::transmute(cut = label_col, regime = label_val, dv = dv,
+                       n = nrow(d), funds = dplyr::n_distinct(d$code),
+                       periods = dplyr::n_distinct(d$period),
+                       mean_mkt = mean(d$mkt_ret, na.rm = TRUE),
+                       mean_vol_rel = mean(d$vol_rel, na.rm = TRUE),
+                       mean_gap = estimate, se = std_error, t = t, p = p)
+  })
+}
+
+est_mkt <- dplyr::filter(est, !is.na(mkt_ret))
+if (nrow(est_mkt) == 0L) {
+  rlang::warn(paste("No non-missing mkt_ret on the estimation sample --",
+                    "rebuild gap_panel.qs with the current build_gap_panel.R",
+                    "to populate the market return. Skipping regime tables."))
+  by_regime <- tibble::tibble()
+} else {
+  # Terciles are cut on the PERIOD-level market return, not on fund-rows, so a
+  # month with many surviving funds does not drag the breakpoints toward itself.
+  mkt_by_period <- est_mkt %>%
+    dplyr::distinct(mandate, period, mkt_ret) %>%
+    dplyr::group_by(mandate) %>%
+    dplyr::mutate(mkt_tercile = dplyr::ntile(mkt_ret, 3)) %>%
+    dplyr::ungroup()
+  est_mkt <- dplyr::left_join(est_mkt, mkt_by_period,
+                              by = c("mandate", "period", "mkt_ret"))
+
+  by_regime <- dplyr::bind_rows(
+    purrr::map_dfr(c(0L, 1L), function(b) {
+      d <- dplyr::filter(est_mkt, bear == b)
+      if (nrow(d) == 0L) return(NULL)
+      regime_cell(d, "direction", if (b == 1L) "DOWN" else "UP")
+    }),
+    purrr::map_dfr(sort(unique(est_mkt$mkt_tercile)), function(k) {
+      d <- dplyr::filter(est_mkt, mkt_tercile == k)
+      if (nrow(d) == 0L) return(NULL)
+      regime_cell(d, "mkt_tercile", paste0("T", k))
+    }),
+    purrr::map_dfr(levels(est_mkt$crisis_f), function(g) {
+      d <- dplyr::filter(est_mkt, crisis_f == g)
+      if (nrow(d) == 0L) return(NULL)
+      regime_cell(d, "crisis", g)
+    }),
+    # Volatility split. Rows before the trailing window fills have no regime and
+    # are excluded rather than lumped into "low", so the two cells together are
+    # smaller than the full sample by construction.
+    purrr::map_dfr(c(0L, 1L), function(h) {
+      d <- dplyr::filter(est_mkt, !is.na(high_vol), high_vol == h)
+      if (nrow(d) == 0L) return(NULL)
+      regime_cell(d, "volatility", if (h == 1L) "HIGH" else "LOW")
+    }),
+    purrr::map_dfr(levels(est_mkt$vol_regime_f), function(g) {
+      d <- dplyr::filter(est_mkt, !is.na(vol_regime_f), vol_regime_f == g)
+      if (nrow(d) == 0L) return(NULL)
+      regime_cell(d, "vol_regime", g)
+    })
+  )
+
+  readr_write(by_regime, "gap_by_regime.csv")
+  cat("\n=== Gap by market regime (pp/month), two-way clustered ===\n")
+  print(as.data.frame(by_regime), digits = 3)
+
+  # Machine vs average fund inside each regime. This is the number that shows
+  # WHERE the gap comes from: winning more on the way up, or losing less on the
+  # way down. Averaged over fund-rows so it matches the gap decomposition.
+  capture <- est_mkt %>%
+    dplyr::group_by(direction = ifelse(bear == 1L, "DOWN", "UP")) %>%
+    dplyr::summarise(periods = dplyr::n_distinct(period),
+                     mean_mkt = mean(mkt_ret, na.rm = TRUE),
+                     avg_fund = mean(r_fund, na.rm = TRUE),
+                     machine  = mean(r_ml, na.rm = TRUE),
+                     diff     = mean(r_ml - r_fund, na.rm = TRUE),
+                     .groups = "drop")
+  readr_write(capture, "gap_updown_capture.csv")
+  cat("\n=== Up/down capture: machine vs fund raw returns (pp/month) ===\n")
+  print(as.data.frame(capture), digits = 3)
+}
+
+if (nrow(regime_reg) > 0L) {
+  readr_write(regime_reg, "gap_regime_regressions.csv")
+  cat("\n=== Spec 3 (direction + crisis) / Spec 4 (adds volatility),",
+      "two-way clustered ===\n",
+      "    (no time FE -- Group C terms are absorbed by them by construction;\n",
+      "     RHS centered, so (Intercept) is the DV at average characteristics\n",
+      "     AND average market state, comparable to Spec 1's intercept.\n",
+      "     Spec 4 starts 12 months later: vol_rel needs a filled window.)\n")
+  for (sp in unique(regime_reg$spec)) {
+    for (d in c("gap", "gap_raw")) {
+      cat("\n--", sp, "| DV =", d, "--\n")
+      print(as.data.frame(dplyr::select(
+        dplyr::filter(regime_reg, spec == sp, dv == d), -spec, -dv)), digits = 3)
+    }
+  }
+}
 
 
 # =============================================================================
