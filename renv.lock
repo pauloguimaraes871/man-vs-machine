@@ -4,7 +4,7 @@
     "Repositories": [
       {
         "Name": "CRAN",
-        "URL": "https://packagemanager.posit.co/cran/latest"
+        "URL": "https://packagemanager.posit.co/cran/2026-07-20"
       }
     ]
   },
@@ -2540,12 +2540,6 @@
       "Author": "Hadley Wickham [aut, cre], Yihui Xie [aut] (<https://orcid.org/0000-0003-0645-5666>), Michael Lawrence [ctb], Thomas Kluyver [ctb], Jeroen Ooms [ctb], Barret Schloerke [ctb], Adam Ryczkowski [ctb], Hiroaki Yutani [ctb], Michel Lang [ctb], Karolis Koncevičius [ctb], Posit Software, PBC [cph, fnd]",
       "Maintainer": "Hadley Wickham <hadley@posit.co>",
       "Repository": "CRAN"
-    },
-    "factoRverse": {
-      "Package": "factoRverse",
-      "Version": "0.6.1",
-      "Source": "Local",
-      "Path": "C:/Users/paulo.fonteles/OneDrive - Sicoob/Documentos/Doutorado/Man vs Machine/factoRverse/v.0.6.1/factoRverse_0.6.1.tar.gz"
     },
     "fansi": {
       "Package": "fansi",
@@ -6092,11 +6086,6 @@
       "Author": "Hadley Wickham [aut, cre] (<https://orcid.org/0000-0003-4757-117X>), Lionel Henry [aut], Posit Software, PBC [cph, fnd] (03wc8by49)",
       "Maintainer": "Hadley Wickham <hadley@posit.co>",
       "Repository": "CRAN"
-    },
-    "qs": {
-      "Package": "qs",
-      "Version": "0.27.3",
-      "Source": "Repository"
     },
     "quadprog": {
       "Package": "quadprog",
