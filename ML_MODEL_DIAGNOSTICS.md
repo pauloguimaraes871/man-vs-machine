@@ -357,7 +357,35 @@ weight `quantile_tau`. At `tau = 0.67` under-prediction is penalized 0.67 agains
 0.33 for over-prediction, the fitted object is the 67th conditional quantile, and
 predictions shift up. The tuner maximizes `Score = -mpe`, so the sign is handled.
 
-**Two knobs, and they are independent:**
+**The two arms as implemented are deliberately asymmetric:**
+
+| Arm | `chosen_eval_metric` | `custom_objective` | Channel |
+|---|---|---|---|
+| `rmse` | rmse | squared_error | baseline |
+| `mpe` | mpe, tau 0.67 | squared_error | **selection only** |
+| `mphe` | mphe, delta 1 | **pseudo_huber_error** | **selection + training** |
+
+`translate_metrics()` maps `pseudo_huber_error` to `reg:pseudohubererror` for
+xgb and `keras::loss_huber(delta)` for the NNs, and to **NULL** for ols, glmnet
+and rf — those take no custom objective. So on the `mphe` arm glmnet and rf move
+through selection only, while xgb and nn1–nn3 move through both. That splits the
+arm into two readable groups: a difference confined to glmnet/rf is a selection
+effect; one appearing only in xgb/nn is a training-objective effect.
+
+**Two caveats.**
+
+1. On the `mpe` arm, `translate_metrics()` does not support `mpe` as an
+   in-training metric for xgb or nn and falls back to `rmse` for the
+   **early-stop** criterion, while still applying `mpe` to hyperparameter
+   selection (factoRverse warns at runtime). Selection is the channel under
+   test, but the arm is not a pure pinball run and should not be described as
+   one.
+2. **OLS is a free control on the `rmse` and `mpe` arms only.** It is untuned, so
+   it is bit-identical between those two — if its portfolio moves, that is a
+   plumbing bug. On `mphe` its objective changes with everything else, so it is
+   not a control there.
+
+**The underlying knobs:**
 
 | Slot | Current | Effect of changing it |
 |---|---|---|
