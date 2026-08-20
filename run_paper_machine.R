@@ -634,10 +634,16 @@ patch_sb_configs <- function(cfgs, training_sample_size = NULL,
       }
     }
 
-    # Tuning-metric arm -- see .EVAL_METRIC_ARMS. Applied to every tuned config
-    # regardless of tuning_method, so the grid and bayes arms can each be run
-    # under any metric. `custom_objective` is intentionally untouched.
-    {
+    # Tuning-metric arm -- see .EVAL_METRIC_ARMS. Applied to every config in
+    # SB_CONFIGS (the ML pool this paper machine dispatches) regardless of
+    # tuning_method, so the grid and bayes arms can each be run under any
+    # metric. Gated on SB_CONFIGS, NOT on every cfg in cfgs: create_sb_configs()
+    # returns the pipeline's FULL base-learner pool, which also includes
+    # heuristic configs (e.g. sw_lt_perf) carrying a heuristic custom_objective
+    # like "max_lt_perf_agg_z_score". Without this gate, the EVAL_OBJECTIVE
+    # overwrite below hits those too and fails class validity, which requires
+    # 'max_'/'min_' + a heuristic metric name for that config type.
+    if (nm %in% SB_CONFIGS) {
       tsm <- cfg@tuning_strategy
       if (!is.null(tsm) && !identical(tsm@chosen_eval_metric, EVAL_METRIC)) {
         message(sprintf("  %-13s chosen_eval_metric: %s -> %s",
