@@ -65,6 +65,7 @@ meta_grid <- read_run_bundle("meta_grid.qs")
 mb_grid   <- read_run_bundle("mb_grid.qs")
 learners  <- read_run_bundle("learners_grid.qs")
 screen    <- read_run_bundle("screen.qs")
+ss        <- read_run_bundle("ss.qs")
 
 # The mandate whose portfolios every exhibit below is built from. The machine
 # ran four; the paper's figures are the broad-market contest.
@@ -630,6 +631,59 @@ latex_figure <- function(file, bold_title, body, label, fig_dir = "figures") {
 }
 
 dir.create(here::here("figures"), showWarnings = FALSE)
+
+# ---- Benjamini--Hochberg signal eligibility through time -------------------
+# Replicate the ``Eligibility by Theme'' view of the stored individual-signal
+# frequentist BH result, while passing all tickers and dates explicitly to
+# avoid the interactive selections in plot.meta_dataframe().
+bh_ss_results <- ss$ss_backtest_results_lists$freq_ss_backtest_results_lists$
+  ind_signals$freq_np_BH
+if (is.null(bh_ss_results)) {
+  rlang::abort("The individual-signal freq_np_BH result is absent from ss.qs.")
+}
+
+bh_signal_universe <- bh_ss_results@signal_universe_m_df
+bh_signal_universe@data <- bh_signal_universe@data %>%
+  dplyr::filter(.data$theme != "forced") %>%
+  dplyr::mutate(
+    eligibility = dplyr::if_else(.data$is_eligible == 1, "elected", "not elected")
+  )
+
+grDevices::pdf(NULL)
+plot(
+  bh_signal_universe,
+  type = "tile_heatmap",
+  clustering_variables = "tickers",
+  variable = "eligibility",
+  calc_stat = "mean",
+  tickers = "all",
+  dates = sort(unique(bh_signal_universe@data$dates)),
+  palette = "journal"
+)
+bh_eligibility_plot <- ggplot2::last_plot()
+grDevices::dev.off()
+
+ggplot2::ggsave(
+  here::here("figures", "bh_eligibility_heatmap.png"),
+  bh_eligibility_plot,
+  width = 14, height = 10, dpi = 300, bg = "white"
+)
+
+bh_eligibility_figure_tex <- latex_figure(
+  "bh_eligibility_heatmap.png",
+  "Signal eligibility under the Benjamini--Hochberg adjustment.",
+  paste(
+    "Each row is an individual non-sector characteristic and each column is an",
+    "annual screening date. Tiles identify characteristics selected by the 5\\%",
+    "Benjamini--Hochberg procedure using an expanding 81-month initial estimation",
+    "window. All available characteristics and screening dates are shown."
+  ),
+  "fig:bh_eligibility"
+)
+writeLines(
+  bh_eligibility_figure_tex,
+  here::here("figures", "bh_eligibility_figure.tex")
+)
 
 # ---- Feature importance across ML models -----------------------------------
 # For each model in the individual-signals run, factoRverse stores a
@@ -3381,6 +3435,7 @@ writeLines(hp_table_tex, here::here("tables", "hyperparameter_bounds.tex"))
 
 # Keep the manuscript's figure assets synchronized with the generated outputs.
 generated_figure_files <- c(
+  "bh_eligibility_heatmap.png",
   "feature_importance_bar.png",
   "feature_importance_heatmap.png",
   "composition_sector_weight.png",

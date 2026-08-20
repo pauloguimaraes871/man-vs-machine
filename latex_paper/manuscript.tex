@@ -104,7 +104,7 @@
 
 
 \begin{abstract}
-AI’s potential to replace human roles is a prominent concern and jobs in financial markets industry may be specially jeopardized. This study compared out-of-sample performance of Machine-Learning models and human managers in equity portfolio management, which involves deciphering the complex, non-linear and time-varying individual stocks return-generating process. Through a walk-forward validation scheme and grid-search, various models and ensembles were used to forecast benchmark-relative returns with 46,312 monthly observations and nearly one hundred factor zoo features. Rules-based, Risk-Parity, and Mean-Tracking-Error portfolios backtested these models ability to generate economic value, producing significant out-of-sample alphas (t-stats above 3.0 or 4.0) and better risk-adjusted returns than equity funds composites, including Best-in-Class. Although not conclusive proof of human replacement, these findings highlight Machine-Learning relevance in equity portfolio management.
+AI’s potential to replace human roles is a prominent concern and jobs in financial markets industry may be specially jeopardized. This study compared out-of-sample performance of Machine-Learning models and human managers in equity portfolio management, which involves deciphering the complex, non-linear and time-varying individual stocks return-generating process. Through a walk-forward validation scheme and grid-search, seven models and one equal-weighted ensemble were used to forecast benchmark-relative returns with 50,309 monthly observations and 108 factor-zoo features. Rules-based, Risk-Parity, and Mean-Tracking-Error portfolios backtested these models ability to generate economic value, producing significant out-of-sample alphas (t-stats above 3.0 or 4.0) and better risk-adjusted returns than equity funds composites, including Best-in-Class. Although not conclusive proof of human replacement, these findings highlight Machine-Learning relevance in equity portfolio management.
 \vspace{0.5em}
 \noindent
 
@@ -187,9 +187,9 @@ EXR_{i,t+h} = E_{t}(R_{i,t+h} - R_{m,t+h}|\mathbf{z_{i,t}}) + \epsilon_{i,t+h} =
 
 where $EXR_{i,t+h}$ represents $h$-month return $R_{i,t+h}$ of stock $i$ at time $t+h$ in excess to market-cap weighted benchmark return $R_{m,t+h}$. Conditional on a set of $j = 1, \ldots, J$ firm-level characteristics $\mathbf{z_{i,t}}$, $g^{*}(\mathbf{z_{i,t}})$ represents a general flexible function that neither depends on $i = 1, \ldots, I$ or $t = 1, \ldots, T$, making estimates more stable \citep{deprado2018}. Following \citet{blitzetal2023}, $h$ is chosen as 3 and IBOV was chosen as cap-weighted benchmark.
 
-The data used in this study comprises monthly observations from Brazilian listed stocks between October 2005 and May 2024, covering $T = 224$ months and more than one thousand stocks, which come down to $I = 578$ after liquidity filtering, in an unbalanced panel due to stocks being listed and delisted. Therefore, a observation $n = 1, \ldots, N$ consists of a combination of $i$ and $t$.
+The data used in this study comprises monthly observations from Brazilian listed stocks between August 2005 and July 2026, covering $T = 252$ months. After liquidity filtering, the unbalanced panel contains $I = 590$ tickers, reflecting listings and delistings over the sample. An observation $n = 1, \ldots, N$ is a ticker-month combination.
 
-Based on raw financial and market point-in-time metrics from Comdinheiro, $J = 105$ features were constructed, including valuation metrics, past price and return information (including momentum, short-term reversal, skewness, MAX and others), market cap and liquidity indicators, a comprehensive set of accounting indicators covering quality, profitability, leverage, investment and accruals anomalies, growth rate and standardized unexpected realizations of accounting indicators, risk measures related to market prices and fundamentals, short interest ratios, debt and equity issuance indicators, seasonality,  and sector classifications. While the majority of variables are constructed in an absolute fashion, some industry-relative factors were also developed to account for within-industry effects, following \cite{asnessporterstevens2000}.
+Based on raw financial and market point-in-time metrics from Comdinheiro, $J = 108$ features were constructed, including sector classifications, valuation metrics, past price and return information (including momentum, short-term reversal, skewness, MAX and others), market-cap and liquidity indicators, accounting indicators covering quality, profitability, leverage, investment and accruals anomalies, growth rates and standardized unexpected realizations, risk measures related to market prices and fundamentals, short-interest ratios, debt and equity issuance indicators, and seasonality. While the majority of variables are constructed in an absolute fashion, some industry-relative factors were also developed to account for within-industry effects, following \cite{asnessporterstevens2000}.
 
 Comparatively, \citet{lewellen2015}, \citet{freybergerneuhierlweber2020}, and \citet{gukellyxiu2020} used 15, 36, and 94 signals, respectively. In the latter study, the authors interacted original features with aggregate macroeconomic predictors, increasing the total number of covariates to 920. For analytical purposes when trying to understand feature importance, we categorized variables in different themes. Further details are provided in the Appendix. Finally, differences in definitions from original studies may exist because of data availability.    
 
@@ -197,11 +197,13 @@ Each month $t$, characteristics were winsorized to percentiles 97.5\% and 0.025\
 
 Another important consideration in terms of data cleansing and pre-processing relates to missing observations. Imputation was done by applying the KNN algorithm in a time-wise manner (ie. using only data available at $t$ to impute $t$).
 
-Due to their abundance, micro and nanocap stocks tend to heavily influence estimates. However, their generally low liquidity poses real constraints on position sizing, especially for large investors. Therefore, for each period, stocks were ordered by mean 3-month trading volume, and those in the 0.5\% percentile were excluded, following \citet{houxuezhang2017}, \citet{jensenkellypedersen2023}, and \citet{hanauerkalsbach2023}. Despite their minimal participation in total trading volume, this group accounts for more than 50\% of total observations.
+To ensure that the portfolios remain implementable, the liquidity screen retains only stocks with at least BRL 1 million of inflation-adjusted average daily trading value over the preceding three months and trading-day participation of at least 95\%. This screen removes securities for which position sizing and turnover would be difficult to implement.
    
-We reinforced point-in-time information by comparing the publication date of each statement with each respective date, and relabeled each ticker with its respective CVM code, thus ensuring adequate computation of features that require time-series information. After cleaning and pre-processing, a total of $N = 44,351$ observations were used for training, validation, and testing.
+We reinforced point-in-time information by comparing the publication date of each statement with each respective date, and relabeled each ticker with its respective CVM code, thus ensuring adequate computation of features that require time-series information. After cleaning and pre-processing, a total of $N = 50,309$ observations were used for training, validation, and testing.
 
-Although feature selection is already implemented by some of the algorithms used and despite the fact that many of the most-famous anomalies have already been published before the beginning of our sample, we implemented an additional remedy for selection bias. Each of the $J$ characteristics are embedded in cap-scaled portfolios and then, in a consistent walk-forward scheme, net of costs returns are tested for significantly positive alphas, after adjusting for multiple testing with the Benjamini-Hochberg procedure.      
+Although feature selection is already implemented by some of the algorithms used and despite the fact that many of the most-famous anomalies have already been published before the beginning of our sample, we implemented an additional remedy for selection bias. Each of the $J$ characteristics are embedded in cap-scaled portfolios and then, in a consistent walk-forward scheme, net-of-cost returns are tested for significantly positive alphas after adjusting for multiple testing with the Benjamini-Hochberg procedure. The first screen uses an 81-month expanding estimation window. Figure~\ref{fig:bh_eligibility} shows eligibility for all screened characteristics and dates.
+
+\input{../figures/bh_eligibility_figure.tex}
 
 
 \subsection{Choosing $g()$}
@@ -236,7 +238,7 @@ Although widely used, k-fold CV assumes independently and identically distribute
 
 Two main walk-forward schemes exist: rolling and expanding. In rolling schemes, the training sample size remains fixed, causing the training, validation, and test samples to advance in time at each iteration. Conversely, expanding-windows schemes involve enlarging training sets recursively, while the validation and test sets progress \citep{kellyxiu2023, tashman2000}.
 
-Theory and empirical evidence are more supportive of walk-forward schemes when data isn't stationary, a condition that heavily impacts CV \citep{cerqueiraetal2017, bergmeiretal2018, schnaubelt2019}.   Therefore, in this study, a walk-forward expanding scheme, similar to \citet{hanauerkalsbach2023} and \citet{gukellyxiu2020}, is employed. Therefore, at every yearly refit, the training sample is increased, with a fixed origin, and the validation and testing sets are moved forward in time. Initial split considers a buffer period of 120 observations for training and 60 for validation. 
+Theory and empirical evidence are more supportive of walk-forward schemes when data isn't stationary, a condition that heavily impacts CV \citep{cerqueiraetal2017, bergmeiretal2018, schnaubelt2019}. Therefore, in this study, a walk-forward expanding scheme, similar to \citet{hanauerkalsbach2023} and \citet{gukellyxiu2020}, is employed. At every yearly refit, the training sample is increased from a fixed origin, while the validation and testing sets move forward. The initial split uses 82 monthly observations for training and 36 monthly observations for validation.
 
 Data leakage is a significant concern when designing the optimal scheme, as it introduces forward-looking bias. In finance, leakage often results in inflated backtests and disappointing out-of-sample risk-adjusted returns \citep{deprado2018}.
 
@@ -248,10 +250,10 @@ We estimate seven base learners: OLS, Elastic Net (ENET), Random Forest (RF), XG
 
 The tuning design targets the parameters that control effective model complexity. ENET varies the penalty-path floor and L1/L2 mixing weight. RF varies maximum depth and the fraction of characteristics considered at each split, while fixing the number of trees and minimum leaf size. XGB varies tree depth, learning rate, and boosting rounds; row and feature subsampling, minimum child weight, and split penalties are fixed. The neural networks vary the learning rate and L1 penalty over three prespecified shallow architectures; dropout, batch size, epochs, and L2 regularization are fixed. After hyperparameter selection, each neural-network specification is refitted from ten independent random initializations and its predictions are averaged, following \citet{gukellyxiu2020}. These choices concentrate the search on the parameters most directly related to the bias--variance trade-off and keep the search budget feasible at each walk-forward refit.
 
-We also form equal-weighted prediction ensembles: one over the neural networks, one over the nonlinear learners, and one over all base learners. Equal weighting avoids a further layer of estimation in a sample in which model errors are correlated but the number of refits is limited. Algorithmic objectives, tree construction, neural-network architecture, and implementation details are reported in Appendix~\ref{app:algorithmic}.
+We form one equal-weighted prediction ensemble across all seven base learners. Equal weighting avoids a further layer of estimation in a sample in which model errors are correlated but the number of refits is limited. Algorithmic objectives, tree construction, neural-network architecture, and implementation details are reported in Appendix~\ref{app:algorithmic}.
 
 \iffalse
-In this paper, seven models were applied: Ordinary Least Squares (OLS), Elastic Net (ENET), Random Forest (RF), eXtreme Gradient Boosting - XGBoost (XGB) and three Artificial Neural Networks (ANN) with different architectures. Additionally, three ensembles were considered: one of all ANN (E\_ANN), one with nonlinear models (E\_NL), and a final comprising all models (E\_ALL).  
+In this paper, seven models were applied: Ordinary Least Squares (OLS), Elastic Net (ENET), Random Forest (RF), eXtreme Gradient Boosting - XGBoost (XGB) and three Artificial Neural Networks (ANN) with different architectures. A single equal-weighted ensemble combined all seven base learners.
 
 \paragraph{Model 1: OLS}
 For OLS ($m = 1$), there are no hyperparameters to tune, which tends to be a problem in large dimensional sets. For OLS, $g()$ assumes the following linear form:
@@ -571,13 +573,13 @@ In this section, results on ML models' out-of-sample predictive performance and 
 
 \subsection{Expected Returns Model}
 
-Table \ref{summarystats} presents summary statistics for out-of-sample forecasting errors. While OLS exhibited the highest RMSE, ML methods generally yielded superior results due to the introduction of shrinkage and non-linearities. Specifically, E\_A had the lowest RMSE overall, with RF emerging as the best individual performer.
+Table \ref{summarystats} presents summary statistics for out-of-sample forecasting errors. While OLS exhibited the highest RMSE, ML methods generally yielded superior results due to the introduction of shrinkage and non-linearities. The equal-weighted ensemble had the lowest RMSE overall, with RF emerging as the best individual performer.
 
 Table \ref{summarystats} also presents $R_{OOS}^{2}$ and MAPE. OLS performed poorly in terms of both measures, with a negative value for $R_{OOS}^{2}$, thus aligning with results of \citet{gukellyxiu2020} and \citet{hanauerkalsbach2023}. The introduction of regularization methods and flexible functional forms leads to significant improvement in this metric.
 
 Particularly, ANN showed good performance for the first two architecture choices, declining for ANN3. This also aligns with literature's findings of shallow outperforming deep learning in return prediction \citep{kellyxiu2023}. 
 
-Even simple ensembling methods yielded favorable results, with E\_A displaying best $R^{2}_{OOS}$ overall, making it the preferred choice for portfolios.
+The equal-weighted ensemble also displayed the best $R^{2}_{OOS}$ overall, making it the preferred choice for portfolio construction.
 
 Figure \ref{fig:hyper_time} illustrates hyperparameter choice for each rebalancing. For certain models, like ENET, there was minimal variation, while for others, there was more heterogeneity.
 
@@ -591,7 +593,7 @@ Overall, among 39 most important features, there were 8 in Value (47\%), 6 in Mo
 
 
 \subsection{ML Portfolios Performance}
-As mentioned, portfolios used E\_A as an expected returns model, due to its superiority in $R^{2}_{OOS}$. At total, 13 portfolio schemes were used: 4 heuristics (EW, CW, CS, SW), 3 RP, 3 MTO\_UNC and 3 MTO\_CON, each using $\widehat{\Sigma}_{SAM, t}$, $\widehat{\Sigma}_{PCA, t}$ or $\widehat{\Sigma}_{S, t}$.
+As mentioned, portfolios used the equal-weighted all-model ensemble as the expected-returns model, due to its superiority in $R^{2}_{OOS}$. At total, 13 portfolio schemes were used: 4 heuristics (EW, CW, CS, SW), 3 RP, 3 MTO\_UNC and 3 MTO\_CON, each using $\widehat{\Sigma}_{SAM, t}$, $\widehat{\Sigma}_{PCA, t}$ or $\widehat{\Sigma}_{S, t}$.
 
 To assess out-of-sample ML performance, the cap-weighted IBOV index was used as the equity benchmark and the CDI as the risk-free benchmark. Fund, IBOV and CDI daily simple returns were geometrically compounded over each interval from the day after the previous calendar 15th through the current calendar 15th, matching the ML backtest endpoints.
 
@@ -628,12 +630,12 @@ Figure \ref{fig:corr_perf} documents active-return correlations between ML portf
 ML portfolios out-of-sample performance relates to results of \citet{hanauerkalsbach2023} and \citet{gukellyxiu2020}. Nevertheless, despite obvious differences in sample and feature sets, the present work employed benchmark-relative 3-month returns, instead of raw 1-month returns, and also different portfolio-construction schemes. 
 
 \section{Conclusion}
-In this study, various ML methods were employed to forecast market-relative cross-sectional returns over a 3-month horizon. This involved fitting OLS, ENET, RF, XGB and ANN to nearly one hundred signals from the factor zoo literature, covering the most common anomalies and factor themes, and a sample of 1,014 Brazilian stocks spanning 271 months.
+In this study, various ML methods were employed to forecast market-relative cross-sectional returns over a 3-month horizon. This involved fitting OLS, ENET, RF, XGB and three neural-network architectures to 108 signals, including sector indicators, in an unbalanced panel of 590 Brazilian tickers observed over 252 monthly periods.
 
 
 Contrary to other areas where ML has been successful, financial data exhibit non-stationarity and structural breaks, calling for the adoption of a Walk-Forward validation-scheme. 
 
-Regularized and nonlinear models demonstrated higher predictive performance than OLS, with positive $R^{2}_{OOS}$, being E\_A the most accurate method. Therefore, using its predictions as expected return inputs, diverse long-only portfolio construction methods were applied, encompassing heuristics, risk-parity and MTO.
+Regularized and nonlinear models demonstrated higher predictive performance than OLS, with positive $R^{2}_{OOS}$. The equal-weighted all-model ensemble was the most accurate specification. Its predictions were then used as expected-return inputs in diverse long-only portfolio-construction methods, encompassing heuristics, risk parity and MTO.
 
 %HK.
 % Insert two paragraphs explaining contributions and implications of the study for theory and practice or practitioners. (paragraph should be different from the one in the Introduction, and should highlight why the study is different from others.
