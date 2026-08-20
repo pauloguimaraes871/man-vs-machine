@@ -380,7 +380,37 @@ predictions much less than swapping families. §4.4b's whole-sample tau result
 that this is worth *one* run to find out, not a program of work.
 
 **Cost.** A full re-run of the sb + mb + meta stages for the grid arm. Do not run
-both arms — §3.2 already establishes BO adds nothing.
+both tuning arms — §3.2 already establishes BO adds nothing.
+
+**How to run it** (implemented in `run_paper_machine.R`):
+
+```bash
+PAPER_EVAL_METRIC=mpe Rscript run_paper_machine.R
+```
+
+`PAPER_EVAL_METRIC` is `rmse` (default), `mpe` (pinball, `quantile_tau = 0.67`)
+or `mphe` (pseudo-Huber, `delta = 1`). It is orthogonal to `PAPER_ARM`.
+Artefacts are tagged — `mb_grid_mpe.qs`, `meta_grid_mpe.qs`,
+`mb_grid_mphe.qs` — and the `rmse` tag is empty, so the existing
+`mb_grid.qs` / `meta_grid.qs` keep their names and stay valid.
+
+**Before the first metric run, move the SB checkpoint aside:**
+
+```bash
+mv data/checkpoints/backtest_base_signal_blending_checkpoint/backtest_base_signal_blending_checkpoint_2026-07-15.qs /tmp/
+```
+
+The checkpoint path is keyed on the gold vintage **alone** — not the arm, not
+the metric — and `backtest_base_signal_blending()` skips any model already in
+it. Config names are identical across metric arms, so without this the mpe run
+would skip every model and hand back rmse-tuned learners wearing an mpe label.
+The run now aborts with an explicit message rather than doing that silently, but
+the checkpoint still has to be moved. The baseline does not need it: `sb_grid.qs`
+already exists, so the checkpoint only matters for resuming an interrupted run.
+
+**What to compare.** Realized net Sharpe/IR of the resulting portfolios, not the
+training metric — that is the whole point of §4.2. OLS is the control and must
+not move.
 
 ### 4.5 Decision and recommended experiment
 
