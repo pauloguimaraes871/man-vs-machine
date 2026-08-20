@@ -88,7 +88,7 @@ selected; report boosting length as early-stopping-governed, not grid-selected.
 | l2 / dropout | not stated as tuned | not stated as tuned | not stated | not disclosed | l2 0,1e-4; drop 0.25,0.50 (grid) / drop 0.25–0.75 (bayes) | **l2 = 0, drop = 0.25, fixed** |
 | batch size | **10,000, fixed** | **10,000, fixed** | not stated | not disclosed | 256 (grid, fixed) / 128–512 (bayes) | **256, fixed** — see note |
 | epochs | **100, fixed**; early stopping governs actual length | **100, fixed** | early stopping only (sole listed hyperparameter) | not disclosed | 100 (grid, fixed) / 60–110 (bayes) | **100, fixed** |
-| ensemble size | **10, fixed** (not tuned; see appendix note below) | **10, fixed** ("as in De Nard et al. 2022") | **50, fixed** | not disclosed | **1** (no ensembling implemented) | **1** in the current run; factoRverse proposal pending to add `n_ensembles` |
+| ensemble size | **10, fixed** (not tuned; see appendix note below) | **10, fixed** ("as in De Nard et al. 2022") | **50, fixed** | not disclosed | **1** (no ensembling implemented) | **10, fixed**; independent initialization draws are averaged after hyperparameter selection |
 
 \* Unmodified pipeline `nn2_bayes` used `c(32,16,8)` — identical to `nn3_bayes`,
 almost certainly a copy-paste defect (now fixed on `fix/sb-nn-config-defects`).
@@ -104,15 +104,12 @@ panel's training window is roughly 16k rows. 256 keeps the batch a genuine
 subsample of the data (true SGD) rather than approaching full-batch; state this
 as an intentional adaptation to sample size, not an unexplained deviation.
 
-**Ensemble size — open question, not yet resolved.** All three primary sources fix
-an ensemble as part of the NN specification (not a validation-tuned parameter);
-none of the texts read state explicitly whether the *validation score used to
-select* λ₁/LR is itself computed from the ensemble average or from a single
-network. GKX's footnote on parallelising "different seeds" is suggestive of
-pervasive ensembling but not conclusive. This script currently trains one network;
-the pending factoRverse proposal would average `n_ensembles` independent refits
-*after* hyperparameter selection — cheaper than ensembling the search itself, and
-a disclosed simplification rather than a claimed exact match.
+**Ensemble size.** The current script sets `n_ensembles = 10` for the neural-network
+refit. Hyperparameter selection is conducted with one network per candidate;
+after selection, ten independently initialized networks are refitted and their
+predictions are averaged. This follows the use of random initializations and
+averaging in Gu, Kelly, and Xiu (2020), while avoiding a tenfold increase in the
+search budget.
 
 ---
 

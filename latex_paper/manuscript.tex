@@ -213,17 +213,17 @@ In ML, balancing bias and variance and determining the complexity of $g()$ entai
 
 \citet{kellymalamudzhou2022} argue that, given optimal shrinkage, expected out-of-sample expected returns are strictly increasing in complexity due to very unstable and non-linear behavior of stock returns requiring more parametrization. Hence, they argue that even highly complex models (even when there are more parameters than observations) can generate substantial out-of-sample Sharpe ratios.
 
-Bayesian optimization is the hyperparameter-tuning procedure used. It searches over bounded hyperparameter values \(\lambda_{m} \in \Lambda_{m}\), evaluates each candidate by validation-sample Root-Mean-Squared-Error (RMSE), and then sequentially proposes new candidates using an upper-confidence-bound acquisition rule. Thus, the method balances exploitation of hyperparameter regions with low predicted validation error and exploration of uncertain regions of the search space. 
+The primary specification selects hyperparameters by grid search. At each refit, every candidate combination is evaluated by validation-sample Root-Mean-Squared-Error (RMSE), and the model is re-estimated on the combined training and validation samples using the selected configuration. The grids focus on the regularization and complexity parameters that determine the bias--variance trade-off, while holding secondary implementation choices at conventional fixed values.
 
-This choice is especially useful in this setting because Brazilian equity data provide a smaller effective sample than broad global datasets, while each ML specification still has several hyperparameters. Under a limited validation budget, grid search may spend many evaluations on uninformative regions of the search space. Bayesian optimization is therefore a sample-efficient tuning rule: it uses previous validation errors to concentrate new trials where improvement is more plausible, while still preserving exploration through the UCB acquisition rule \citep{bouthilliervaroquaux2020, bergstra2012random}.
+As a robustness check, the same models are also tuned by Bayesian optimization over the recorded continuous domains. This procedure uses an upper-confidence-bound acquisition rule to allocate additional evaluations between promising and uncertain regions of the search space \citep{bouthilliervaroquaux2020, bergstra2012random}. The grid-search results remain the primary evidence because the discrete candidate sets are transparent and closely match the validation-based procedures used in related return-prediction studies.
 
-Candidate values for hyperparameters should strike a balance between computational efficiency and coverage of a wide spectrum of values, thus encompassing various degrees of shrinkage for variance control \citep{lavalle2004relationship}. Following related studies, the bounds adopted for Bayesian-optimization is outlined in Table \ref{hyperchoice}.
+Table \ref{hyperchoice} reports the realised grid-search and Bayesian-optimization domains from the completed runs, together with their search budgets. Candidate values balance coverage of economically relevant levels of regularization and flexibility with the limited effective sample available in the Brazilian market \citep{lavalle2004relationship}.
 
 Finally, the model is refit using $\tau_{training} \cup \tau_{validation}$ and genuine out-of-sample performance is measured by computing different statistics on $\tau_{testing}$, such that $\tau_{testing} \cap (\tau_{training} \cup \tau_{validation}) = \emptyset$ \citep{kellyxiu2023}. 
 
 Besides RMSE, out-of-sample performance was also assessed by $R^{2}$ ($R_{OOS}^{2}$), under an undemeaned denominator \citep{gukellyxiu2020}, Mean-Absolute-Error (MAE), Mean-Absolute-Percentage-Error (MAPE), Mean Pseudo Huber Error (MPHE), Mean Pinball Error (MPE) and Hit Ratio (HR).
 
-At each rebalancing date, a linear Global Surrogate Model (GSM) is fit to each model predictions, thus enabling the measurement of importance of each feature, computed as the normalized coefficients.  
+At each rebalancing date, a linear Global Surrogate Model (GSM) is fit to each model's predictions. Its normalized coefficients are the sole feature-importance measure reported in the paper, providing a common approximation of the prediction function across model classes.
 
 \subsubsection{Validation Scheme} \label{valshceme}
 In order not to make results dependent on a specific split,  $\mathbf{T}$ splits are considered, such that $\mathbf{\tau_{training}}$, $\mathbf{\tau_{validation}}$ and $\mathbf{\tau_{testing}}$ each represent sets of groups of observations. For each specific split, corresponding groups are disjoint sets.
@@ -244,6 +244,13 @@ In order to prevent leakage, at each fit, a $h$-sized space is introduced, there
 
 \subsubsection{Candidates for $g()$}
 
+We estimate seven base learners: OLS, Elastic Net (ENET), Random Forest (RF), XGBoost (XGB), and three feed-forward neural networks (NN1--NN3). OLS is the unrestricted linear benchmark. ENET retains a linear specification but regularizes coefficients through an L1/L2 penalty, allowing shrinkage and variable selection. RF and XGB admit nonlinearities and interactions through tree ensembles: RF averages independently grown trees to reduce variance, whereas XGB adds shallow trees sequentially to reduce residual error. NN1--NN3 use one, two, and three hidden layers, respectively, and provide a flexible function-approximation benchmark.
+
+The tuning design targets the parameters that control effective model complexity. ENET varies the penalty-path floor and L1/L2 mixing weight. RF varies maximum depth and the fraction of characteristics considered at each split, while fixing the number of trees and minimum leaf size. XGB varies tree depth, learning rate, and boosting rounds; row and feature subsampling, minimum child weight, and split penalties are fixed. The neural networks vary the learning rate and L1 penalty over three prespecified shallow architectures; dropout, batch size, epochs, and L2 regularization are fixed. After hyperparameter selection, each neural-network specification is refitted from ten independent random initializations and its predictions are averaged, following \citet{gukellyxiu2020}. These choices concentrate the search on the parameters most directly related to the bias--variance trade-off and keep the search budget feasible at each walk-forward refit.
+
+We also form equal-weighted prediction ensembles: one over the neural networks, one over the nonlinear learners, and one over all base learners. Equal weighting avoids a further layer of estimation in a sample in which model errors are correlated but the number of refits is limited. Algorithmic objectives, tree construction, neural-network architecture, and implementation details are reported in Appendix~\ref{app:algorithmic}.
+
+\iffalse
 In this paper, seven models were applied: Ordinary Least Squares (OLS), Elastic Net (ENET), Random Forest (RF), eXtreme Gradient Boosting - XGBoost (XGB) and three Artificial Neural Networks (ANN) with different architectures. Additionally, three ensembles were considered: one of all ANN (E\_ANN), one with nonlinear models (E\_NL), and a final comprising all models (E\_ALL).  
 
 \paragraph{Model 1: OLS}
@@ -275,7 +282,7 @@ $l_{2}$ regularization reduces estimates toward zero, curbing large values, wher
 
 Setting $\lambda^{\psi}_{2} = 0$ is equivalent to OLS.
 
-For $m = 1, 2$, variable importance was determined by the absolute value of estimated coefficients.
+% Superseded: reported feature importance is based exclusively on the GSM.
 
 \paragraph{Models 3 and 4: Ensembled tree-based regressions}
 
@@ -371,7 +378,7 @@ XGB also implements variance reduction through a shrinkage parameter that scales
 
 Another crucial resource for training the model is early stopping, which involves halting the learning process when validation error ceases to improve after $\lambda^{\phi}_{4}$ rounds.
 
-For tree methods, feature importance was calculated based on global overall gain attributed to subsequent splits related to a specific feature, across the nodes for which the characteristic was selected \citep{ishwaran2014}. 
+% Superseded: reported feature importance is based exclusively on the GSM.
 
 \paragraph{Model 5: Neural Networks}
 
@@ -456,6 +463,8 @@ Finally, ensembling was applied, combining predictions from different models. Th
 
 Various methods, including linear combinations and stacked ensembles, can be used. In this work, we considered a linear equal-weighted ensemble.
 
+
+\fi
 
 \subsection{ML Portfolios}
 
@@ -572,7 +581,7 @@ Even simple ensembling methods yielded favorable results, with E\_A displaying b
 
 Figure \ref{fig:hyper_time} illustrates hyperparameter choice for each rebalancing. For certain models, like ENET, there was minimal variation, while for others, there was more heterogeneity.
 
-Finally, variable-importance summaries are displayed in Figures \ref{fig:fi_bar}--\ref{fig:hier_fi}. They report importance by theme, its evolution over time, and its hierarchical decomposition across base learners and the ensemble.
+Finally, Figures \ref{fig:fi_bar}--\ref{fig:surrogate_fit} report the GSM-based importance summaries: theme-level loadings, their evolution over time, and the share of each model's predictions reproduced by its linear surrogate.
 
 Some variables were rather consensual choices among models, such as mom\_res\_12m, assets\_yield, sales\_yield, roe\_3m, net\_mrg\_12m and \\ vol\_12m. 
 
@@ -674,6 +683,61 @@ Those exhibited out-of-sample significant alphas and higher risk-adjusted return
 
 
 \label{appendices}
+\section{Algorithmic Details}\label{app:algorithmic}
+
+This appendix provides the functional forms and implementation details for the prediction models summarized in Section~\ref{sec:methods}. Let $y_{i,t+1}$ denote the benchmark-relative three-month return and $\mathbf{z}_{i,t}$ the vector of characteristics available at month $t$. Models are estimated on the pooled panel using only information available at the formation date.
+
+\subsection{Linear Models}
+
+OLS estimates the linear benchmark
+\begin{equation}
+g_{\mathrm{OLS}}(\mathbf{z}_{i,t})=\mathbf{z}_{i,t}^{T}\boldsymbol{\theta}.
+\end{equation}
+ENET minimizes squared prediction error plus a mixture of L1 and L2 penalties:
+\begin{multline}
+\label{elasticeq}
+\mathcal{L}_{\mathrm{ENET}}=
+\frac{1}{N}\sum_{i,t}\left[y_{i,t+1}-g(\mathbf{z}_{i,t})\right]^2+
+\lambda^{\psi}(1-\lambda^{\rho})\sum_j|\theta_j|+
+\frac{1}{2}\lambda^{\psi}\lambda^{\rho}\sum_j\theta_j^2.
+\end{multline}
+The penalty-path floor $\lambda^{\psi}$ and ridge share $\lambda^{\rho}$ are selected at each refit. The reported mixing weight is one minus \texttt{glmnet}'s \texttt{alpha}.
+
+\subsection{Tree Ensembles}
+
+A regression tree partitions characteristic space into terminal regions $C_l$ and assigns each observation the mean outcome in its region:
+\begin{equation}
+g_{\mathrm{tree}}(\mathbf{z}_{i,t})=
+\sum_{l=1}^{L}\theta_l\mathbf{1}\{\mathbf{z}_{i,t}\in C_l\}.
+\end{equation}
+RF averages trees grown on bootstrap samples, with a random fraction of characteristics considered at each split. This decorrelates trees and reduces variance. XGB instead constructs an additive sequence of trees,
+\begin{equation}
+\label{objxgb}
+g_{\mathrm{XGB}}(\mathbf{z}_{i,t})=\sum_{f=1}^{F}T_f(\mathbf{z}_{i,t}),
+\end{equation}
+where each new tree is fitted to the remaining loss from the preceding ensemble. Tree depth governs interaction order, the learning rate scales the contribution of each new tree, and the number of trees controls the length of the boosting sequence. The regularized XGBoost objective also penalizes leaf complexity and leaf weights \citep{chenguestrin2016}.
+
+\subsection{Neural Networks}
+
+The neural-network models are feed-forward networks with ReLU activations,
+\begin{equation}
+\label{simplenn}
+g_{\mathrm{NN}}(\mathbf{z}_{i,t})=
+\mathbf{W}_{K}\operatorname{ReLU}\left(\cdots\operatorname{ReLU}
+\left(\mathbf{W}_{1}\mathbf{z}_{i,t}+\mathbf{b}_{1}\right)\cdots\right)+\mathbf{b}_{K}.
+\end{equation}
+NN1 has one hidden layer with 32 units; NN2 has layers with 32 and 16 units; and NN3 has layers with 32, 16, and 8 units. The networks are trained with Adam, batch normalization, and dropout. The tuning grid varies the learning rate and L1 penalty; the other training settings are held fixed as reported in Table~\ref{hyperchoice}. After hyperparameter selection, each architecture is refitted from ten independent random initializations ($n_{\mathrm{ensembles}}=10$) and the predictions are averaged, following \citet{gukellyxiu2020}. This reduces sensitivity to a single initialization without increasing the tuning budget, because tuning itself uses one fitted network. The loss combines squared error and the L1 penalty,
+\begin{equation}
+\label{objnn}
+\mathcal{L}_{\mathrm{NN}}=
+\sum_{i,t}\left[y_{i,t+1}-g_{\mathrm{NN}}(\mathbf{z}_{i,t})\right]^2+
+\lambda^{\omega}\sum_k\left\|\mathbf{W}_k\right\|_1.
+\end{equation}
+
+\subsection{Ensembles and Interpretation}
+
+The cross-model ensemble forecast is the equal-weighted mean of its constituent forecasts and is distinct from the within-architecture averaging of independently initialized neural networks. Feature interpretation is based exclusively on the GSM: at each refit, a linear surrogate is fitted to a model's predictions using the full characteristic set, and its normalized coefficients provide a common approximation of the prediction function across model classes. We do not use native coefficient magnitudes or tree split gains as reported importance measures.
+
     \section{Tables and Figures}
 
 \begin{table}[t]
@@ -722,8 +786,6 @@ ENS & 21.91 & 15.53 & 14.63 & 7.77 & 1.83 & 0.0003 \\
 \input{../figures/hyperparameters_over_time_figure.tex}
 
 \input{../figures/feature_importance_figures.tex}
-
-\input{../figures/hierarchical_feature_importance_figure.tex}
 
 \input{../figures/surrogate_fit_figure.tex}
 

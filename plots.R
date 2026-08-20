@@ -1338,86 +1338,6 @@ factor_table_tex <- c(
 
 writeLines(factor_table_tex, here::here("tables", "factor_attribution.tex"))
 
-# ---- Hierarchical (base-learner -> meta-learner) feature importance --------
-# factoRverse's built-in "Hierarchical Feature Importance" plot for a
-# sb_metabacktest_results object draws the signals -> base learners -> meta
-# learner importance tree (via igraph/ggraph). Requires the ggraph/igraph/
-# ggrepel plotting packages. The method ends in print(p) and returns the object
-# invisibly, so we render it into a null device, recover the ggplot with
-# last_plot(), replace its hard-coded size-2 node labels with repelled labels,
-# override its enormous backtest-id subtitle, and save that.
-hfi_top_n    <- 10L
-hfi_subtitle <- "ML Ensemble"   # set to NULL to remove the subtitle entirely
-
-grDevices::pdf(NULL)
-plot(mb_grid,
-     plot_id = "Hierarchical Feature Importance",
-     top_n = hfi_top_n, palette = "journal")
-grDevices::dev.off()
-
-hfi_plot <- ggplot2::last_plot()
-if (!"name" %in% colnames(hfi_plot$data)) {
-  rlang::abort("The hierarchical feature-importance graph has no node-name column.")
-}
-# The tuning arm is embedded in the node names ("glmnet_bayes" / "glmnet_grid");
-# strip whichever this run used so the graph labels stay model names.
-hfi_plot$data$name <- gsub(
-  "_(bayes|grid)",
-  "",
-  as.character(hfi_plot$data$name),
-  ignore.case = TRUE
-)
-is_node_text <- vapply(
-  hfi_plot$layers,
-  function(layer) inherits(layer$geom, "GeomText"),
-  logical(1)
-)
-hfi_plot$layers <- hfi_plot$layers[!is_node_text]
-jp_hfi <- factoRverse:::.journal_palette()
-hfi_plot <- hfi_plot +
-  ggrepel::geom_text_repel(
-    data = hfi_plot$data,
-    ggplot2::aes(x = x, y = y, label = name),
-    inherit.aes = FALSE,
-    color = jp_hfi$text,
-    size = 4.0,
-    fontface = "bold",
-    seed = 20260726,
-    box.padding = 0.25,
-    point.padding = 0.2,
-    min.segment.length = 0,
-    max.overlaps = Inf
-  ) +
-  ggplot2::labs(subtitle = hfi_subtitle) +
-  ggplot2::theme(
-    text = ggplot2::element_text(size = plot_base_size, color = jp_hfi$text),
-    plot.title = ggplot2::element_text(size = plot_base_size + 2, face = "bold"),
-    plot.subtitle = ggplot2::element_text(size = plot_base_size, face = "italic"),
-    legend.title = ggplot2::element_text(size = plot_base_size),
-    legend.text = ggplot2::element_text(size = plot_base_size - 1)
-  )
-ggplot2::ggsave(here::here("figures", "hierarchical_feature_importance.png"),
-                hfi_plot, width = 14, height = 10, dpi = 300, bg = "white")
-
-# ---- Paste-ready LaTeX for the hierarchical feature-importance figure ------
-hierarchical_fi_figure_tex <- latex_figure(
-  "hierarchical_feature_importance.png",
-  "Hierarchical feature-importance decomposition.",
-  paste(
-    "Decomposition of feature importance from the individual signals through the",
-    "base learners (OLS, GLMNET, RF, XGB, NN1--NN3) to the meta learner (the ML",
-    "Ensemble). Nodes are signals, base learners and the meta learner; edge width",
-    "and colour encode the importance each signal contributes to a base learner,",
-    "and each base learner to the meta learner. Only the",
-    sprintf("%d most important signals per learner are shown.", hfi_top_n),
-    "Estimated on the individual-signals run."
-  ),
-  "fig:hier_fi"
-)
-
-writeLines(hierarchical_fi_figure_tex,
-           here::here("figures", "hierarchical_feature_importance_figure.tex"))
-
 # ---- Global surrogate fit: how linear each ML model's predictions are -------
 # final_gsm is the fitted OLS global surrogate (an `lm`) regressing each model's
 # out-of-sample predictions on the [-1, 1] cross-sectionally scaled signals.
@@ -3235,6 +3155,230 @@ bounds_table_tex <- c(
 )
 writeLines(bounds_table_tex, here::here("tables", "hyperparameter_bounds.tex"))
 
+# ---- Appendix: realised grid and Bayesian search spaces -------------------
+# The first table builder above predates the Bayesian robustness run. Replace
+# its one-arm output with a two-panel table read from the recorded workflows.
+# This preserves the realised domains when the current script later changes.
+hp_scalar_or_na <- function(x) {
+  if (is.null(x) || length(x) == 0L) NA_real_ else as.numeric(x[[1]])
+}
+
+hp_extract_workflow <- function(base_results, arm) {
+  purrr::imap_dfr(base_results, function(sbr, nm) {
+    workflow <- sbr@sb_backtest_workflow[[1]]
+    domain <- workflow$hyper_grid_domain_list
+    if (is.null(domain)) return(tibble::tibble())
+
+    purrr::imap_dfr(domain, function(value, hyper) {
+      fixed <- is.list(value) && identical(value$distribution_choice, "constant")
+      domain_values <- if (fixed) as.numeric(value$value) else as.numeric(value)
+      if (length(domain_values) == 0L || anyNA(domain_values) || any(!is.finite(domain_values))) {
+        rlang::abort(paste0("Invalid recorded domain for ", arm, "::", nm, "::", hyper, "."))
+      }
+      tibble::tibble(
+        arm = arm,
+        model = fi_model_label(nm),
+        hyper = hyper,
+        candidate_values = list(domain_values),
+        lo = min(domain_values),
+        hi = max(domain_values),
+        fixed = fixed,
+        method = workflow$tuning_method,
+        init_points = hp_scalar_or_na(workflow$init_points),
+        n_iter = hp_scalar_or_na(workflow$n_iter),
+        acquisition = workflow$acq
+      )
+    })
+  })
+}
+
+hp_grid <- hp_extract_workflow(sb_list, "Grid search")
+if (nrow(hp_grid) == 0L || !all(hp_grid$method == "grid_search")) {
+  rlang::abort("The baseline bundle does not contain a complete grid-search specification.")
+}
+
+# No later plot requires the grid base-learner library. Releasing it before
+# loading the robustness bundle avoids retaining both large result objects.
+rm(mb_grid, sb_list)
+invisible(gc())
+hp_bayes_bundle <- read_run_bundle("mb_bayes.qs")
+hp_bayes <- hp_extract_workflow(
+  hp_bayes_bundle@base_sb_backtest_results_list,
+  "Bayesian optimization"
+)
+rm(hp_bayes_bundle)
+invisible(gc())
+if (nrow(hp_bayes) == 0L || !all(hp_bayes$method == "bayesian_opt")) {
+  rlang::abort("The robustness bundle does not contain a complete Bayesian-optimization specification.")
+}
+hp_bounds <- dplyr::bind_rows(hp_grid, hp_bayes)
+
+# NN1--NN3 share one displayed column only when their recorded domains agree.
+hp_collapse_nn <- function(d) {
+  purrr::map_dfr(unique(d$arm), function(this_arm) {
+    arm_data <- dplyr::filter(d, arm == this_arm)
+    nn_models <- intersect(c("NN1", "NN2", "NN3"), unique(arm_data$model))
+    if (length(nn_models) > 1L) {
+      nn_sets <- lapply(nn_models, function(model) {
+        arm_data %>%
+          dplyr::filter(model == !!model) %>%
+          dplyr::arrange(hyper) %>%
+          dplyr::select(hyper, lo, hi, fixed, method)
+      })
+      if (!all(vapply(nn_sets[-1], function(x) isTRUE(all.equal(x, nn_sets[[1]])),
+                      logical(1)))) {
+        rlang::abort(paste0("NN1--NN3 do not share one recorded search space in the ",
+                            this_arm, " arm."))
+      }
+      arm_data <- arm_data %>%
+        dplyr::filter(!model %in% nn_models[-1]) %>%
+        dplyr::mutate(model = dplyr::if_else(model == nn_models[[1]], "NN", model))
+    }
+    arm_data
+  })
+}
+hp_bounds <- hp_collapse_nn(hp_bounds)
+
+# Implementation names are learner-specific: glmnet alpha is a mixing weight,
+# whereas XGB alpha is an L1 penalty. The manuscript symbols are kept separate
+# from their plain-language names in the appendix.
+hp_name <- c(
+  "GLMNET::lambda.min.ratio" = "Penalty path floor",
+  "GLMNET::alpha" = "L1/L2 mixing",
+  "RF::num.trees" = "Trees / boosting rounds",
+  "XGB::nrounds" = "Trees / boosting rounds",
+  "RF::max.depth" = "Maximum depth",
+  "XGB::max_depth" = "Maximum depth",
+  "RF::min.bucket" = "Minimum terminal node size",
+  "XGB::min_child_weight" = "Minimum terminal node size",
+  "RF::mtry" = "Feature subsampling fraction",
+  "XGB::colsample_bytree" = "Feature subsampling fraction",
+  "XGB::subsample" = "Row subsampling fraction",
+  "XGB::eta" = "Learning rate",
+  "NN::lr" = "Learning rate",
+  "XGB::alpha" = "L1 penalty",
+  "NN::regularizer_l1" = "L1 penalty",
+  "NN::regularizer_l2" = "L2 penalty",
+  "XGB::gamma" = "Minimum split loss",
+  "NN::droprate" = "Dropout rate",
+  "NN::size_of_batch" = "Batch size",
+  "NN::number_of_epochs" = "Epochs"
+)
+hp_symbol <- c(
+  "Penalty path floor" = "$\\lambda^{\\psi}$",
+  "L1/L2 mixing" = "$\\lambda^{\\rho}$",
+  "Trees / boosting rounds" = "$\\lambda^{T}$ / $\\lambda^{F}$",
+  "Maximum depth" = "$\\lambda^{D}$",
+  "Minimum terminal node size" = "$\\lambda^{L}$",
+  "Feature subsampling fraction" = "$\\lambda^{R}$",
+  "Row subsampling fraction" = "$\\lambda^{S}$",
+  "Learning rate" = "$\\lambda^{\\eta}$",
+  "L1 penalty" = "$\\lambda^{\\alpha}$ / $\\lambda^{\\omega}$",
+  "L2 penalty" = "$\\lambda^{\\delta}$",
+  "Minimum split loss" = "$\\lambda^{\\gamma}$",
+  "Dropout rate" = "$\\lambda^{R}_{5}$",
+  "Batch size" = "$\\lambda^{b}$",
+  "Epochs" = "$\\lambda^{e}$"
+)
+hp_bounds$key <- paste(hp_bounds$model, hp_bounds$hyper, sep = "::")
+hp_unmapped <- setdiff(hp_bounds$key, names(hp_name))
+if (length(hp_unmapped) > 0L) {
+  rlang::abort(paste0("Unmapped hyperparameter(s): ",
+                      paste(hp_unmapped, collapse = ", "), "."))
+}
+hp_bounds$name <- unname(hp_name[hp_bounds$key])
+hp_row_order <- names(hp_symbol)
+hp_models <- c("GLMNET", "RF", "XGB", "NN")
+hp_model_labels <- c(GLMNET = "ENET", RF = "RF", XGB = "XGB", NN = "NN1--NN3")
+
+hp_format <- function(x) {
+  if (x == 0) return("0")
+  if (x == round(x) && abs(x) >= 1) return(format(x, scientific = FALSE, trim = TRUE))
+  exponent <- log10(abs(x))
+  if (abs(x) < 0.01 && abs(exponent - round(exponent)) < 1e-9) {
+    return(sprintf("$10^{%d}$", as.integer(round(exponent))))
+  }
+  sub("[.]$", "", sub("0+$", "", sprintf("%.5f", x)))
+}
+hp_cell <- function(arm, name, model) {
+  row <- hp_bounds[hp_bounds$arm == arm & hp_bounds$name == name &
+                     hp_bounds$model == model, , drop = FALSE]
+  if (nrow(row) == 0L) return("--")
+  if (nrow(row) > 1L) {
+    rlang::abort(paste0("Duplicate table cell for ", arm, "::", name, "::", model, "."))
+  }
+  values <- row$candidate_values[[1]]
+  if (row$fixed[[1]]) return(paste0("Fixed: ", hp_format(values[[1]])))
+  if (identical(arm, "Grid search")) {
+    return(paste(vapply(values, hp_format, character(1)), collapse = ", "))
+  }
+  sprintf("[%s, %s]", hp_format(row$lo[[1]]), hp_format(row$hi[[1]]))
+}
+hp_panel_rows <- function(arm, panel) {
+  names_present <- intersect(hp_row_order, unique(hp_bounds$name[hp_bounds$arm == arm]))
+  c(
+    paste0("\\multicolumn{6}{@{}l}{\\textit{Panel ", panel, ". ", arm, "}} ",
+           intToUtf8(92), intToUtf8(92)),
+    vapply(names_present, function(name) {
+      paste0(name, " & ", hp_symbol[[name]], " & ",
+             paste(vapply(hp_models, function(model) hp_cell(arm, name, model), character(1)),
+                   collapse = " & "),
+             intToUtf8(92), intToUtf8(92))
+    }, character(1), USE.NAMES = FALSE)
+  )
+}
+hp_grid_budget <- function(model) {
+  rows <- hp_bounds[hp_bounds$arm == "Grid search" & hp_bounds$model == model, , drop = FALSE]
+  if (nrow(rows) == 0L) return("--")
+  format(prod(vapply(rows$candidate_values, length, integer(1))), trim = TRUE)
+}
+hp_bayes_budget <- function(field, model) {
+  rows <- hp_bounds[hp_bounds$arm == "Bayesian optimization" & hp_bounds$model == model, , drop = FALSE]
+  values <- unique(rows[[field]])
+  if (length(values) != 1L || is.na(values)) {
+    rlang::abort(paste0("Invalid Bayesian budget for ", model, "::", field, "."))
+  }
+  as.numeric(values)
+}
+hp_budget_row <- function(label, values) {
+  paste0(label, " &  & ", paste(values, collapse = " & "),
+         intToUtf8(92), intToUtf8(92))
+}
+
+hp_table_tex <- c(
+  "\\begin{table}[p]",
+  "\\captionsetup{justification=raggedright,labelsep=none,singlelinecheck=false,labelformat=boldlabel}",
+  "\\renewcommand{\\arraystretch}{0.85}",
+  "\\caption[Hyperparameter search spaces]{\\footnotesize \\textbf{: Hyperparameter search spaces.} The table reports the realised settings recorded in the completed grid-search baseline and Bayesian-optimization robustness runs.}",
+  "\\scriptsize",
+  "\\setlength{\\tabcolsep}{3pt}",
+  "\\begin{tabularx}{\\linewidth}{>{\\raggedright\\arraybackslash}m{3.0cm}>{\\centering\\arraybackslash}m{1.55cm}*{4}{>{\\raggedleft\\arraybackslash}X}}",
+  "\\hline",
+  paste0("Hyperparameter name & Symbol & ",
+         paste(unname(hp_model_labels[hp_models]), collapse = " & "),
+         " ", intToUtf8(92), intToUtf8(92)),
+  "\\hline",
+  hp_panel_rows("Grid search", "A"),
+  "\\hline",
+  hp_budget_row("Grid combinations per refit", vapply(hp_models, hp_grid_budget, character(1))),
+  "\\hline",
+  hp_panel_rows("Bayesian optimization", "B"),
+  "\\hline",
+  hp_budget_row("Initial design points", vapply(hp_models, function(m) hp_bayes_budget("init_points", m), numeric(1))),
+  hp_budget_row("Acquisition iterations", vapply(hp_models, function(m) hp_bayes_budget("n_iter", m), numeric(1))),
+  hp_budget_row("Total model evaluations per refit", vapply(hp_models, function(m) {
+    hp_bayes_budget("init_points", m) + hp_bayes_budget("n_iter", m)
+  }, numeric(1))),
+  "\\hline",
+  paste0("\\multicolumn{6}{@{}p{0.98\\linewidth}@{}}{\\textit{The grid-search arm is the primary specification. Its cells list all candidate values, and its final row gives the number of combinations evaluated at each refit. The Bayesian-optimization arm is a robustness check. Its non-fixed cells give continuous bounds, ``Fixed'' denotes a parameter excluded from the Gaussian-process search, and UCB is the acquisition rule. Both arms minimize validation RMSE over a 36-month expanding-window validation sample and re-optimize at each annual refit. OLS has no tuning parameters and is omitted. The ENET mixing weight is the ridge share, equal to one minus \\texttt{glmnet}'s \\texttt{alpha}; the penalty path floor is \\texttt{lambda.min.ratio}, not the fitted penalty itself.}} ",
+         intToUtf8(92), intToUtf8(92)),
+  "\\hline",
+  "\\end{tabularx}",
+  "\\label{hyperchoice}",
+  "\\end{table}"
+)
+writeLines(hp_table_tex, here::here("tables", "hyperparameter_bounds.tex"))
+
 # Keep the manuscript's figure assets synchronized with the generated outputs.
 generated_figure_files <- c(
   "feature_importance_bar.png",
@@ -3242,7 +3386,6 @@ generated_figure_files <- c(
   "composition_sector_weight.png",
   "composition_liquidity_weight.png",
   "portfolio_characteristics.png",
-  "hierarchical_feature_importance.png",
   "surrogate_fit.png",
   "hyperparameters_over_time.png",
   "cumulative_return.png",
