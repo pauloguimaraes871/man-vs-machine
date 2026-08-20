@@ -2541,6 +2541,12 @@
       "Maintainer": "Hadley Wickham <hadley@posit.co>",
       "Repository": "CRAN"
     },
+    "factoRverse": {
+      "Package": "factoRverse",
+      "Version": "0.7.0",
+      "Source": "Local",
+      "Path": "C:/Users/paulo.fonteles/OneDrive - Sicoob/Documentos/Doutorado/Man vs Machine/factoRverse/v.0.7.0/factoRverse_0.7.0.tar.gz"
+    },
     "fansi": {
       "Package": "fansi",
       "Version": "1.0.6",
