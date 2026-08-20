@@ -147,27 +147,46 @@ SB_CONFIGS <- .ARM_CONFIGS[[.paper_arm]]
 #         mechanism as "care more about the stocks actually bought", and the
 #         paper should not describe it as tail-focus.
 #
-#   mphe  pseudo-Huber, delta = 1. A SYMMETRIC robust loss: it downweights
-#         outliers relative to squared error but still scores the whole
-#         distribution evenly. It tests outlier sensitivity, not tail focus.
+#   mphe  pseudo-Huber, delta = 1, applied at BOTH the selection metric and the
+#         training objective. A SYMMETRIC robust loss: it downweights outliers
+#         relative to squared error but still scores the whole distribution
+#         evenly, so it tests outlier sensitivity rather than tail focus.
 #
-# CRITICAL: only `chosen_eval_metric` moves. `custom_objective` stays
-# "squared_error" for every learner, so training is bit-identical across arms
-# and the ONLY thing that changes is which hyperparameters win at each refit.
-# That isolation is the point -- it is what makes the comparison attributable.
-# Training on pseudo-Huber or pinball directly (xgb and nn1-nn3 both support it)
-# is a separate, larger experiment; do not fold it in here.
+# THE TWO ARMS ARE DELIBERATELY NOT SYMMETRIC, and the asymmetry is the design:
 #
-# OLS is untuned and has no tuning_strategy, so it is bit-identical across all
-# three arms. It is therefore a free control: if the OLS portfolio moves between
-# arms, that is a plumbing bug, not a finding.
+#   mpe   SELECTION ONLY. custom_objective stays "squared_error", so training is
+#         bit-identical to the baseline and the only thing that moves is which
+#         hyperparameters win at each refit. That isolation is what makes the
+#         comparison attributable.
+#   mphe  SELECTION AND TRAINING. custom_objective = "pseudo_huber_error", which
+#         translate_metrics() maps to "reg:pseudohubererror" for xgb and
+#         keras::loss_huber(delta = huber_delta) for the neural networks. It is
+#         NULL for ols, glmnet and rf, which take no custom objective -- so on
+#         this arm those three learners change through SELECTION only while
+#         xgb and nn1-nn3 change through both. Read the two groups accordingly:
+#         a difference confined to glmnet/rf is a selection effect, one that
+#         appears only in xgb/nn is a training-objective effect.
 #
-# quantile_tau feeds `mpe` only; huber_delta feeds `mphe` only. Both are set on
-# every arm so the config carries the value that was actually in force.
+# CAVEAT ON EARLY STOPPING, mpe arm. translate_metrics() supports rmse, mae,
+# mphe and mape as in-training metrics for xgb and nn, but NOT mpe; it falls
+# back to rmse for the early-stop criterion while still applying mpe to
+# hyperparameter selection (factoRverse warns about this at runtime). So on the
+# mpe arm, xgb's and the NNs' early stopping still watches rmse. Selection is
+# unaffected, which is the channel being tested, but the arm is not a pure
+# pinball run and the paper should not claim it is.
+#
+# OLS is untuned and has no tuning_strategy. On the rmse and mpe arms it is
+# therefore bit-identical and serves as a free control: if the OLS portfolio
+# moves between those two arms, that is a plumbing bug, not a finding. It is NOT
+# a control on the mphe arm, where its objective changes with everything else.
+#
+# quantile_tau feeds `mpe` only; huber_delta feeds `mphe` at both the metric and
+# the Keras loss. Both are set on every arm so the config carries the value that
+# was actually in force.
 .EVAL_METRIC_ARMS <- list(
-  rmse = list(metric = "rmse", tau = 0.5,  delta = 1),
-  mpe  = list(metric = "mpe",  tau = 0.67, delta = 1),
-  mphe = list(metric = "mphe", tau = 0.5,  delta = 1)
+  rmse = list(metric = "rmse", tau = 0.5,  delta = 1, objective = "squared_error"),
+  mpe  = list(metric = "mpe",  tau = 0.67, delta = 1, objective = "squared_error"),
+  mphe = list(metric = "mphe", tau = 0.5,  delta = 1, objective = "pseudo_huber_error")
 )
 .paper_eval <- Sys.getenv("PAPER_EVAL_METRIC", "rmse")
 if (!.paper_eval %in% names(.EVAL_METRIC_ARMS)) {
@@ -175,9 +194,10 @@ if (!.paper_eval %in% names(.EVAL_METRIC_ARMS)) {
        paste(names(.EVAL_METRIC_ARMS), collapse = ", "),
        "; got '", .paper_eval, "'.")
 }
-EVAL_METRIC <- .EVAL_METRIC_ARMS[[.paper_eval]]$metric
-EVAL_TAU    <- .EVAL_METRIC_ARMS[[.paper_eval]]$tau
-EVAL_DELTA  <- .EVAL_METRIC_ARMS[[.paper_eval]]$delta
+EVAL_METRIC    <- .EVAL_METRIC_ARMS[[.paper_eval]]$metric
+EVAL_TAU       <- .EVAL_METRIC_ARMS[[.paper_eval]]$tau
+EVAL_DELTA     <- .EVAL_METRIC_ARMS[[.paper_eval]]$delta
+EVAL_OBJECTIVE <- .EVAL_METRIC_ARMS[[.paper_eval]]$objective
 # Empty for the baseline so existing artefacts keep their current filenames and
 # are NOT invalidated: sb_grid.qs stays sb_grid.qs, and the mpe/mphe arms write
 # alongside as sb_grid_mpe.qs / sb_grid_mphe.qs.
@@ -638,10 +658,14 @@ patch_sb_configs <- function(cfgs, training_sample_size = NULL,
                         nm, cfg@huber_delta, EVAL_DELTA))
         cfg@huber_delta <- EVAL_DELTA
       }
-      if (!identical(cfg@custom_objective, "squared_error")) {
-        stop("Config '", nm, "' has custom_objective = '", cfg@custom_objective,
-             "'. The tuning-metric arms change SELECTION only; a non-squared ",
-             "training objective would confound the comparison.")
+      # On the mpe arm this is a no-op (objective stays "squared_error") and the
+      # arm isolates selection. On the mphe arm it changes the TRAINING loss for
+      # xgb and nn1-nn3; translate_metrics() returns NULL for ols/glmnet/rf, so
+      # those three are unaffected by this line and move through selection only.
+      if (!identical(cfg@custom_objective, EVAL_OBJECTIVE)) {
+        message(sprintf("  %-13s custom_objective: %s -> %s",
+                        nm, cfg@custom_objective, EVAL_OBJECTIVE))
+        cfg@custom_objective <- EVAL_OBJECTIVE
       }
     }
 
@@ -1059,6 +1083,7 @@ main <- function() {
           if (identical(EVAL_METRIC, "mpe")) paste0(" (tau = ", EVAL_TAU, ")")
           else if (identical(EVAL_METRIC, "mphe")) paste0(" (delta = ", EVAL_DELTA, ")")
           else "",
+          " | objective: ", EVAL_OBJECTIVE,
           " | artefact tag: ", ARM_TAG)
 
   stage_path <- function(name) {
@@ -1471,7 +1496,8 @@ main <- function() {
         metric = pull(function(x) {
           ts <- x@sb_backtest_config@tuning_strategy
           if (is.null(ts)) NULL else ts@chosen_eval_metric   # OLS is untuned
-        })
+        }),
+        objective = pull(function(x) x@sb_backtest_config@custom_objective)
       )
     }, error = function(e) NULL)
 
@@ -1492,6 +1518,13 @@ main <- function() {
            "\nThe checkpoint is keyed on the gold vintage only, so those models",
            " would be skipped and reused, and the arm would silently measure",
            " nothing. Delete the checkpoint (or move it aside) and re-run.")
+    }
+    if (length(probe$objective) > 0 && !all(probe$objective == EVAL_OBJECTIVE)) {
+      stop("SB checkpoint objective mismatch at\n  ", .sb_ckpt,
+           "\nIt holds models trained on '",
+           paste(probe$objective, collapse = "', '"), "' but this run requests '",
+           EVAL_OBJECTIVE, "'. Those models would be skipped and reused.",
+           " Delete the checkpoint (or move it aside) and re-run.")
     }
   }
 
@@ -2037,6 +2070,7 @@ main <- function() {
     tuning_eval_metric     = EVAL_METRIC,
     tuning_quantile_tau    = EVAL_TAU,
     tuning_huber_delta     = EVAL_DELTA,
+    tuning_custom_objective = EVAL_OBJECTIVE,
     artefact_tag           = ARM_TAG,
     tuning_preset          = TUNING_PRESET,
     tuning_used            = sb$tuning_used,
