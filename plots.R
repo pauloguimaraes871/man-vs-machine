@@ -856,13 +856,16 @@ writeLines(
 # ---- Feature importance across ML models -----------------------------------
 # For each model in the individual-signals run, factoRverse stores a
 # feature_importance_m_df: a global OLS surrogate of the model output on the
-# same (standardized) signals, so `normalized_importance` is a regression
-# coefficient. Because signals within a theme are highly correlated, individual
-# coefficients offset each other; summing them within a theme cancels that
-# collinearity artifact and yields the theme's NET contribution. We show, per
-# theme, faceted by model (the grid strategy):
-#   * a diverging bar of the summed net importance in the last period;
-#   * a tile heatmap of the summed net importance per theme over time.
+# same standardized signals. Its `importance` column is the signed surrogate
+# coefficient. Do not aggregate `normalized_importance` here: factoRverse
+# z-scores the coefficient vector cross-sectionally, so an exact zero becomes
+# negative whenever the mean coefficient is positive. That transformation is
+# useful for ranking individual coefficients, but it creates spurious theme
+# exposure and invalid net/gross totals.
+#
+# Aggregate raw coefficients first and then divide both net and gross theme
+# loadings by the model-date total gross loading. Gross shares sum to one within
+# model-date; the signed net share shows what remains after cancellation.
 sb_list <- mb_grid@base_sb_backtest_results_list
 
 # Compact model label from the backtest element name:
@@ -880,7 +883,7 @@ fi_model_order <- c("OLS", "GLMNET", "RF", "XGB", "NN1", "NN2", "NN3")
 fi_all <- purrr::imap_dfr(sb_list, function(sbr, nm) {
   d <- sbr@feature_importance_m_df@data %>%
     dplyr::filter(!is.na(theme)) %>%
-    dplyr::select(dates, theme, normalized_importance)
+    dplyr::select(dates, theme, importance)
   d$model <- fi_model_label(nm)
   d
 })
@@ -889,11 +892,10 @@ fi_all$model <- factor(fi_all$model, levels = intersect(fi_model_order, unique(f
 # Display relabelling of theme values (e.g. "forced" -> "industries").
 fi_all$theme <- dplyr::recode(fi_all$theme, forced = "industries")
 
-# Order themes by overall net (summed) importance so both figures read
-# consistently (largest net contributors at the top).
+# Order themes by aggregate absolute raw importance so all figures are aligned.
 theme_order <- fi_all %>%
   dplyr::group_by(theme) %>%
-  dplyr::summarise(m = sum(normalized_importance, na.rm = TRUE), .groups = "drop") %>%
+  dplyr::summarise(m = sum(abs(importance), na.rm = TRUE), .groups = "drop") %>%
   dplyr::arrange(m) %>%
   dplyr::pull(theme)
 fi_all$theme <- factor(fi_all$theme, levels = theme_order)
@@ -903,58 +905,58 @@ jp_fi <- factoRverse:::.journal_palette()
 # Diverging bars: net (signed sum) importance per theme, last period, by model,
 # drawn INSIDE a grey +/- gross envelope.
 #
-# WHY THE ENVELOPE. Net alone cannot distinguish "this model puts no weight on
-# the theme" from "this model puts large offsetting weights on the theme" --
-# both plot as a bar of length zero. That ambiguity is not hypothetical: OLS's
-# raw coefficients blow up ~30x from 2018 (max |beta| 3.4 -> 108) under
-# near-collinear signals, in +/- pairs that cancel almost exactly on summation,
-# so its net importance collapses to ~0 while its gross loading stays at 10-12.
-# Read alone, the net panel says OLS stopped using the signals; it did not (its
-# OOS accuracy is unaffected -- see the note in the caption).
-#
-# gross = sum |beta| within the theme: the largest net the theme COULD show if
-# every signal in it pointed the same way. The coloured bar is what survives
-# cancellation. A short bar inside a long envelope = offsetting loadings; a bar
-# that fills its envelope = aligned loadings.
+# Net alone cannot distinguish no loading from large offsetting loadings. Gross
+# is sum |beta| within the theme: the largest net the theme could show if every
+# signal pointed the same way. Dividing by model total gross makes the envelopes
+# comparable across learners while preserving cancellation.
 fi_bar <- fi_all %>%
   dplyr::group_by(model) %>%
   dplyr::filter(dates == max(dates)) %>%
   dplyr::group_by(model, theme) %>%
-  dplyr::summarise(importance = sum(normalized_importance, na.rm = TRUE),
-                   gross = sum(abs(normalized_importance), na.rm = TRUE),
+  dplyr::summarise(net = sum(importance, na.rm = TRUE),
+                   gross = sum(abs(importance), na.rm = TRUE),
                    .groups = "drop") %>%
-  dplyr::mutate(sign = ifelse(importance >= 0, "Positive", "Negative"))
+  dplyr::group_by(model) %>%
+  dplyr::mutate(total_gross = sum(gross),
+                net_share = net / total_gross,
+                gross_share = gross / total_gross,
+                alignment = sum(abs(net)) / total_gross,
+                sign = ifelse(net >= 0, "Positive", "Negative")) %>%
+  dplyr::ungroup()
 
 fi_bar_grid <- ggplot2::ggplot(fi_bar, ggplot2::aes(x = theme)) +
-  ggplot2::geom_linerange(ggplot2::aes(ymin = -gross, ymax = gross),
+  ggplot2::geom_linerange(ggplot2::aes(ymin = -gross_share, ymax = gross_share),
                           colour = "grey85", linewidth = 3.4) +
-  ggplot2::geom_col(ggplot2::aes(y = importance, fill = sign), width = 0.55) +
+  ggplot2::geom_col(ggplot2::aes(y = net_share, fill = sign), width = 0.55) +
   ggplot2::geom_hline(yintercept = 0, colour = "grey45", linewidth = 0.25) +
   ggplot2::facet_wrap(~model, ncol = 3) +
   ggplot2::coord_flip() +
   ggplot2::scale_fill_manual(values = c(Positive = jp_fi$primary, Negative = jp_fi$negative),
                              guide = "none") +
   ggplot2::labs(x = NULL,
-                y = "Normalized importance (last period): net = coloured bar, gross ±sum|beta| = grey envelope",
+                y = "Share of model gross loading: net = coloured bar, gross = grey envelope",
                 title = "Net vs gross feature importance by theme across ML models (last period)",
-                # Keep short: at 14in wide a longer subtitle is clipped rather
-                # than wrapped, which silently truncated the previous wording.
-                subtitle = "Short bar inside a wide envelope = offsetting loadings, not absence of exposure") +
+                subtitle = "Raw GSM coefficients aggregated by theme, then scaled by each model's total gross loading") +
   journal_area_theme()
 
 # Tile heatmap of net (summed) importance per theme over time, faceted by model.
 fi_heat <- fi_all %>%
   dplyr::group_by(model, dates, theme) %>%
-  dplyr::summarise(importance = sum(normalized_importance, na.rm = TRUE),
-                   gross = sum(abs(normalized_importance), na.rm = TRUE),
-                   .groups = "drop")
+  dplyr::summarise(net = sum(importance, na.rm = TRUE),
+                   gross = sum(abs(importance), na.rm = TRUE),
+                   .groups = "drop") %>%
+  dplyr::group_by(model, dates) %>%
+  dplyr::mutate(total_gross = sum(gross),
+                net_share = net / total_gross,
+                gross_share = gross / total_gross) %>%
+  dplyr::ungroup()
 
 fi_heat_base_size <- 16
-fi_heat_grid <- ggplot2::ggplot(fi_heat, ggplot2::aes(x = dates, y = theme, fill = importance)) +
+fi_heat_grid <- ggplot2::ggplot(fi_heat, ggplot2::aes(x = dates, y = theme, fill = net_share)) +
   ggplot2::geom_tile() +
   ggplot2::facet_wrap(~model, ncol = 2) +
   ggplot2::scale_fill_gradient2(low = jp_fi$negative, mid = "#EBEEF1", high = jp_fi$primary,
-                                midpoint = 0, name = "Net norm. importance") +
+                                midpoint = 0, name = "Net share") +
   ggplot2::guides(fill = ggplot2::guide_colorbar(
     title.position = "top",
     title.hjust = 0.5,
@@ -972,23 +974,22 @@ fi_heat_grid <- ggplot2::ggplot(fi_heat, ggplot2::aes(x = dates, y = theme, fill
     legend.title = ggplot2::element_text(size = fi_heat_base_size - 2)
   )
 
-# Companion GROSS heatmap. The net map above cannot separate "no loading" from
-# "offsetting loadings" -- both render as a blank cell. Reading the two together
-# is what shows that OLS's post-2017 blank stripe is cancellation, not silence:
-# its gross stays at 10-12 throughout while its net collapses to ~0.6.
+# Companion gross-share heatmap. The net map cannot separate no loading from
+# offsetting loadings; the gross share shows where coefficient mass is located
+# without allowing signs to cancel.
 fi_heat_gross_grid <- ggplot2::ggplot(fi_heat,
-                                      ggplot2::aes(x = dates, y = theme, fill = gross)) +
+                                      ggplot2::aes(x = dates, y = theme, fill = gross_share)) +
   ggplot2::geom_tile() +
   ggplot2::facet_wrap(~model, ncol = 2) +
   ggplot2::scale_fill_gradient(low = "#EBEEF1", high = jp_fi$primary,
-                               limits = c(0, NA), name = "Gross norm. importance") +
+                               limits = c(0, 1), name = "Gross share") +
   ggplot2::guides(fill = ggplot2::guide_colorbar(
     title.position = "top", title.hjust = 0.5,
     barwidth = grid::unit(8, "cm"), barheight = grid::unit(0.45, "cm")
   )) +
   ggplot2::labs(x = NULL, y = NULL,
                 title = "Gross feature importance by theme over time across ML models",
-                subtitle = "Sum of ABSOLUTE loadings. Equal gross but near-zero net = offsetting signals") +
+                subtitle = "Theme sum of absolute GSM coefficients as a share of model-date total gross loading") +
   journal_area_theme(base_size = fi_heat_base_size) +
   ggplot2::theme(
     panel.grid = ggplot2::element_blank(),
@@ -1012,27 +1013,18 @@ feature_importance_figures_tex <- c(
     "Net and gross feature importance by theme across ML models (last period).",
     paste(
       "Feature importance is a global OLS surrogate of each model's output on",
-      "the same standardized signals, so a loading is a regression coefficient.",
-      "The \\emph{coloured bar} is the NET (signed sum) of loadings within a",
-      "signal theme; the \\emph{grey envelope} spans $\\pm$ the GROSS loading",
-      "($\\sum|\\beta|$ within the theme), i.e.\\ the largest net the theme could",
-      "show if every signal in it pointed the same way. Reading them together",
-      "matters because net alone cannot separate \\emph{no exposure} from",
-      "\\emph{offsetting exposure}: both plot as a bar of length zero. A bar",
-      "that fills its envelope means the theme's signals are aligned; a short",
-      "bar inside a wide envelope means they cancel. This is what distinguishes",
-      "GLMNET from OLS. Both are linear, so the surrogate reproduces them",
-      "exactly ($R^2 = 1$); GLMNET's penalty sets 21 of 42 loadings to zero and",
-      "caps the rest at $|\\beta| \\le 1.3$, keeping one representative per",
-      "collinear cluster, so its bars nearly fill their envelopes. Unpenalised",
-      "OLS retains all 42 with $\\max|\\beta| = 86.9$ in offsetting pairs, so its",
-      "bars collapse inside wide envelopes. The collapse is coefficient",
-      "non-identification under collinearity, NOT a loss of predictive content:",
-      "OLS's out-of-sample RMSE deteriorates the least of all seven models",
-      "across the date its loadings blow up. For the non-linear models the",
-      "surrogate is an approximation ($R^2 = 0.49$ XGB, $0.59$ RF, $0.87$ NN2),",
-      "so their bars understate the dependence the surrogate cannot span.",
-      "Themes are ordered by overall net importance."
+      "the same standardized signals, so the raw loading is a signed regression",
+      "coefficient. Coefficients are first aggregated by theme and then divided",
+      "by each model's total gross loading. The \\emph{coloured bar} is the net",
+      "signed loading; the \\emph{grey envelope} is the gross loading",
+      "$\\sum|\\beta|$. Gross shares sum to one within a model. A coloured bar",
+      "that fills its envelope indicates aligned signals, whereas a short bar",
+      "inside a wide envelope indicates offsetting coefficients. At the final",
+      "refit the ratio of total absolute net theme loading to total gross loading",
+      "is 1.00 for GLMNET, 0.59 for NN2, 0.56 for NN1, 0.50 for RF, 0.26 for",
+      "NN3, 0.25 for XGB and 0.08 for OLS. The OLS result reflects large",
+      "opposing coefficients on correlated momentum signals, rather than a lack",
+      "of momentum exposure. Themes are ordered by aggregate gross importance."
     ),
     "fig:fi_bar"
   ),
@@ -1041,16 +1033,12 @@ feature_importance_figures_tex <- c(
     "feature_importance_heatmap.png",
     "Net feature importance by theme over time across ML models.",
     paste(
-      "Net (signed sum of) normalized feature importance per signal theme at",
-      "each rebalance date, for every ML model (OLS, GLMNET, RF, XGB, NN1--NN3).",
-      "Each panel shows one model; colour encodes net importance on a diverging",
-      "scale centred at zero. Themes are ordered by overall net importance.",
-      "A near-blank panel is ambiguous on its own -- it can mean no loading or",
-      "offsetting loadings -- so this figure should be read against the gross",
-      "map in Figure~\\ref{fig:fi_heatmap_gross}. OLS is the case in point: from",
-      "2018 its net importance is indistinguishable from zero while its gross",
-      "loading is unchanged, because unpenalised coefficients on near-collinear",
-      "signals grow into large offsetting pairs that cancel on summation."
+      "At each refit, raw GSM coefficients are summed within theme and divided",
+      "by that model-date's total gross loading. Colour therefore encodes the",
+      "signed net theme share on a common diverging scale. A stable colour block",
+      "indicates persistence in the sign and relative importance of a theme.",
+      "Near-white cells remain ambiguous between low exposure and offsetting",
+      "signals and should be read with Figure~\\ref{fig:fi_heatmap_gross}."
     ),
     "fig:fi_heatmap"
   ),
@@ -1059,12 +1047,13 @@ feature_importance_figures_tex <- c(
     "feature_importance_heatmap_gross.png",
     "Gross feature importance by theme over time across ML models.",
     paste(
-      "Gross ($\\sum|\\beta|$, sum of ABSOLUTE surrogate loadings) per signal",
-      "theme at each rebalance date. Companion to the net map in",
-      "Figure~\\ref{fig:fi_heatmap}: where a theme is dark here but blank there,",
-      "the model loads on the theme but its signals offset within it. OLS after",
-      "2017 is the clearest instance -- gross of 10--12 against a net of",
-      "roughly 0.6 -- which is why its net panel appears empty."
+      "For each model and refit, the sum of absolute raw GSM coefficients within",
+      "a theme is divided by total gross loading, so theme shares sum to one.",
+      "The figure measures where each surrogate allocates coefficient mass",
+      "without allowing signs to cancel. Read with Figure~\\ref{fig:fi_heatmap}:",
+      "a dark gross cell paired with a pale net cell indicates offsetting",
+      "signals within that theme. This distinction is especially important for",
+      "the unpenalized OLS surrogate and the deeper nonlinear learners."
     ),
     "fig:fi_heatmap_gross"
   )
@@ -1361,7 +1350,7 @@ portfolio_characteristics_figures_tex <- latex_figure(
     "earnings yield (NI/ME), return on equity (12m), gross profitability",
     "(GP/AT), dividend yield (36m median), return volatility (12m), log market",
     "capitalization, quality minus junk (QMJ) and the three-year change in",
-    "FCF/BE. Each line is one portfolio-construction scheme (RP, RP\\_BOX, HRP,",
+    "return on equity. Each line is one portfolio-construction scheme (RP, RP\\_BOX, HRP,",
     "CS, SW, EW, MVO, MVO\\_BOX); the dashed black line is the IBOV benchmark's",
     "weighted average. Vertical scales differ across panels."
   ),
@@ -1622,8 +1611,9 @@ surrogate_fit_figure_tex <- latex_figure(
     "\\emph{Right:} surrogate $R^2$ is the share of prediction variance reproduced",
     "by a linear function of the signals. Values near one indicate an essentially",
     "linear prediction rule, whereas lower values indicate nonlinearities and",
-    "interactions. Both diagnostics use the final-refit surrogate from the",
-    "individual-signals specification."
+    "interactions. The final-refit $R^2$ is 1.00 for OLS and GLMNET, 0.87 for",
+    "NN1 and NN2, 0.71 for NN3, 0.59 for RF, and 0.49 for XGB. Both diagnostics",
+    "use the final-refit surrogate from the individual-signals specification."
   ),
   "fig:surrogate_fit"
 )
@@ -1988,8 +1978,12 @@ correlogram_figures_tex <- c(
       "base learners (OLS, GLMNET, RF, XGB, NN1--NN3). Correlations are computed",
       "cross-sectionally within each month and then averaged over months, so they",
       "measure whether the models rank the same stocks alike rather than sharing a",
-      "common time-series level. Lower correlations indicate more independent",
-      "signals and hence more scope for the ensemble to add value."
+      "common time-series level. Mean correlation across all 21 model pairs is",
+      "0.81. The RF--XGB correlation is 0.82, while mean within-family",
+      "correlation is 0.93 among NN1--NN3 and 0.81 between OLS and GLMNET. The",
+      "lowest pair is OLS--XGB at 0.66. High within-family correlations indicate",
+      "that architecture variants often provide less forecast diversification",
+      "than their different labels suggest."
     ),
     "fig:corr_pred"
   ),
@@ -3609,6 +3603,7 @@ generated_figure_files <- c(
   "bh_eligibility_heatmap.png",
   "feature_importance_bar.png",
   "feature_importance_heatmap.png",
+  "feature_importance_heatmap_gross.png",
   "composition_sector_weight.png",
   "composition_liquidity_weight.png",
   "portfolio_characteristics.png",
