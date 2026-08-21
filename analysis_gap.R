@@ -798,22 +798,24 @@ if (!is.null(ladder)) {
 # 5. Industry descriptives
 # =============================================================================
 
-# --- 5.1 Industry size: raw vs balanced, with coverage -----------------------
-# The two lines answer different questions. Raw AUM rises partly because
-# Economatica covers more funds over time (n_reporting nearly doubles); the
-# balanced series holds the fund set fixed, so its shape is size, not coverage.
-ind_long <- industry %>%
-  dplyr::select(period, Raw = industry_pl, Balanced = industry_pl_balanced) %>%
-  tidyr::pivot_longer(-period, names_to = "series", values_to = "pl") %>%
-  dplyr::filter(!is.na(pl))
+# --- 5.1 Industry size, omitting missing opening-AUM snapshots ---------------
+# `sum_or_zero()` makes an all-missing period explicit in the stored industry
+# panel. That policy is useful for flow aggregation but is not an economic AUM
+# observation. Twelve endpoints have n_reporting == 0; plotting them as zero
+# creates artificial industry collapses. Treat them as missing in descriptives.
+industry_aum <- industry %>%
+  dplyr::filter(.data$n_reporting > 0L,
+                is.finite(.data$industry_pl), .data$industry_pl > 0)
 
-p_size <- ggplot(ind_long, aes(period, pl / 1e6, colour = series)) +
-  geom_line(linewidth = 0.7) +
-  scale_colour_manual(values = c(Raw = "grey55", Balanced = "#1b6ca8")) +
+p_size <- ggplot(industry_aum, aes(period, industry_pl / 1e6)) +
+  geom_line(linewidth = 0.75, colour = "#1b6ca8") +
+  geom_point(data = industry_aum[c(1L, which.max(industry_aum$industry_pl),
+                                   nrow(industry_aum)), ],
+             size = 1.4, colour = "#1b6ca8") +
   scale_y_continuous(labels = scales::comma) +
-  labs(title = "Brazilian equity fund industry: assets under management",
-       subtitle = "Raw sums every reporting fund; balanced holds the fund set fixed, so it is coverage-neutral",
-       x = NULL, y = "R$ billions", colour = NULL)
+  labs(title = "Sample assets under management",
+       subtitle = "Dates with no reported opening AUM are treated as missing",
+       x = NULL, y = "BRL billions")
 ggsave(file.path(FIG_DIR, "industry_size.png"), p_size, width = 9, height = 4.5, dpi = 300, bg = "white")
 
 p_cov <- ggplot(industry, aes(period, n_reporting)) +
@@ -828,8 +830,8 @@ p_flow <- ggplot(industry, aes(period, industry_net_flow / 1e3)) +
   geom_col(aes(fill = industry_net_flow > 0), width = 22, show.legend = FALSE) +
   scale_fill_manual(values = c(`TRUE` = "#2a9d5c", `FALSE` = "#c0392b")) +
   scale_y_continuous(labels = scales::comma) +
-  labs(title = "Net flows into Brazilian equity funds",
-       subtitle = "Aggregated across all reporting funds, per 15th-to-15th window",
+  labs(title = "Net flows",
+       subtitle = "Aggregated over each 15th-to-15th window",
        x = NULL, y = "R$ millions")
 ggsave(file.path(FIG_DIR, "industry_flows.png"), p_flow, width = 9, height = 4, dpi = 300, bg = "white")
 
@@ -855,11 +857,17 @@ ggsave(file.path(FIG_DIR, "industry_entry_exit.png"), p_entry, width = 9, height
 # The captive-distribution hypothesis: where flows do not discipline managers,
 # weak ones survive longer.
 share <- panel %>%
-  dplyr::filter(!is.na(aum)) %>%
+  dplyr::filter(!is.na(aum), aum > 0) %>%
   dplyr::group_by(period, bank_affiliated) %>%
   dplyr::summarise(pl = sum(aum), .groups = "drop_last") %>%
   dplyr::mutate(share = pl / sum(pl)) %>%
   dplyr::ungroup()
+
+bank_share_summary <- share %>%
+  dplyr::group_by(bank_affiliated) %>%
+  dplyr::summarise(mean_share = mean(share), .groups = "drop")
+cat("\n=== Mean AUM share by manager affiliation ===\n")
+print(as.data.frame(bank_share_summary), digits = 3)
 
 p_bank <- ggplot(share, aes(period, share, fill = bank_affiliated)) +
   geom_area() +
@@ -873,7 +881,7 @@ ggsave(file.path(FIG_DIR, "industry_bank_share.png"), p_bank, width = 9, height 
 
 # --- 5.5 Manager concentration ----------------------------------------------
 hhi_gestora <- panel %>%
-  dplyr::filter(!is.na(aum)) %>%
+  dplyr::filter(!is.na(aum), aum > 0, !is.na(gestora)) %>%
   dplyr::group_by(period, gestora) %>%
   dplyr::summarise(pl = sum(aum), .groups = "drop_last") %>%
   dplyr::mutate(s = pl / sum(pl)) %>%
@@ -881,8 +889,8 @@ hhi_gestora <- panel %>%
 
 p_hhi <- ggplot(hhi_gestora, aes(period, hhi)) +
   geom_line(colour = "#1b6ca8", linewidth = 0.7) +
-  labs(title = "Concentration of the asset-management industry",
-       subtitle = "Herfindahl index of manager market shares by AUM",
+  labs(title = "Manager concentration",
+       subtitle = "HHI of manager-level AUM shares",
        x = NULL, y = "HHI")
 ggsave(file.path(FIG_DIR, "industry_manager_hhi.png"), p_hhi, width = 9, height = 3.5, dpi = 300, bg = "white")
 
@@ -923,21 +931,73 @@ ggsave(file.path(FIG_DIR, "gap_over_time_by_mandate.png"), p_gap_m,
        width = 9, height = 6, dpi = 300, bg = "white")
 
 # --- 5.7 Structural characteristics -----------------------------------------
-chars <- est %>% dplyr::distinct(code, redemption_days, expense_ratio, decay_slope, n_pos_min)
+# Redemption notice and fee are static fund attributes. Holdings breadth varies
+# through time, so use each fund's median valid minimum-implied-holdings bound;
+# otherwise funds with more holdings snapshots would receive more histogram
+# weight than funds with shorter histories.
+median_or_na <- function(x) {
+  x <- x[is.finite(x)]
+  if (length(x) == 0L) NA_real_ else stats::median(x)
+}
+
+chars <- est %>%
+  dplyr::group_by(code) %>%
+  dplyr::summarise(
+    redemption_days = dplyr::first(redemption_days),
+    expense_ratio   = dplyr::first(expense_ratio),
+    n_pos_min       = median_or_na(n_pos_min),
+    .groups = "drop"
+  )
 
 p_chars <- ggplot(tidyr::pivot_longer(
   dplyr::select(chars, redemption_days, expense_ratio, n_pos_min),
   dplyr::everything(), names_to = "var", values_to = "value") %>% dplyr::filter(!is.na(value)),
   aes(value)) +
-  geom_histogram(bins = 40, fill = "#1b6ca8", colour = NA) +
-  facet_wrap(~var, scales = "free", labeller = as_labeller(c(
+  geom_histogram(bins = 30, fill = "#1b6ca8", colour = NA) +
+  facet_wrap(~var, ncol = 1, scales = "free", labeller = as_labeller(c(
     redemption_days = "Redemption notice (days)",
     expense_ratio   = "Management fee (% p.a.)",
     n_pos_min       = "Minimum implied holdings"))) +
-  labs(title = "Structural heterogeneity across funds",
-       subtitle = "The variation that identifies the capacity and cost channels",
-       x = NULL, y = "Funds")
+  labs(title = "Fund characteristics",
+       subtitle = "One observation per fund; holdings use the time-series median",
+       x = NULL, y = "Funds") +
+  theme(strip.text = element_text(size = 8),
+        axis.text = element_text(size = 7),
+        plot.subtitle = element_text(size = 8))
 ggsave(file.path(FIG_DIR, "fund_characteristics.png"), p_chars, width = 10, height = 3.6, dpi = 300, bg = "white")
+
+# --- 5.8 Combined fund-industry figure --------------------------------------
+fund_industry_plot <- cowplot::plot_grid(
+  p_size, p_flow, p_chars, p_hhi,
+  labels = c("(a)", "(b)", "(c)", "(d)"),
+  label_fontface = "bold", label_size = 11,
+  ncol = 2, align = "hv", axis = "tblr",
+  rel_heights = c(1, 1.12)
+)
+
+fund_industry_file <- file.path(FIG_DIR, "fund_industry_descriptives.png")
+ggsave(fund_industry_file, fund_industry_plot,
+       width = 11, height = 8.8, dpi = 320, bg = "white")
+
+latex_fund_figure_dir <- here::here("latex_paper", "figures")
+dir.create(latex_fund_figure_dir, showWarnings = FALSE, recursive = TRUE)
+if (!file.copy(fund_industry_file,
+               file.path(latex_fund_figure_dir, basename(fund_industry_file)),
+               overwrite = TRUE)) {
+  rlang::abort("Could not copy the combined fund-industry figure to latex_paper/figures.")
+}
+
+fund_industry_figure_tex <- c(
+  "\\begin{figure}[p]",
+  "\\centering",
+  "\\captionsetup{justification=raggedright,labelsep=none,singlelinecheck=false,labelformat=boldlabel}",
+  "\\caption[Fund sample and industry descriptives]{\\footnotesize \\textbf{: Fund sample and industry descriptives.} Panel (a) sums opening-of-window AUM across reporting sample funds; dates with no reported opening AUM are treated as missing rather than zero. Panel (b) sums net subscriptions over each 15th-to-15th window. Panel (c) reports one observation per fund for redemption notice and management fee and each fund's time-series median minimum-implied-holdings bound. For a valid long-only snapshot with $K\\leq15$ disclosed ranks, the bound is $K+\\lceil[100-\\sum_{k=1}^{K}\\max(w_k,0)]/\\min_{w_k>0}w_k\\rceil$: each undisclosed position cannot exceed the smallest positive disclosed weight. Bounds above 400 and snapshots with material shorts or top-15 long exposure above NAV are omitted. Panel (d) is the Herfindahl index of manager-level AUM shares.}",
+  "\\includegraphics[width=\\linewidth,height=0.82\\textheight,keepaspectratio]{figures/fund_industry_descriptives.png}",
+  "\\label{fig:fund_industry}",
+  "\\end{figure}"
+)
+writeLines(fund_industry_figure_tex,
+           file.path(FIG_DIR, "fund_industry_descriptives_figure.tex"))
 
 
 # =============================================================================

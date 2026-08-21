@@ -203,6 +203,16 @@ We reinforced point-in-time information by comparing the publication date of eac
 
 Although feature selection is already implemented by some of the algorithms used and despite the fact that many of the most-famous anomalies have already been published before the beginning of our sample, we implemented an additional remedy for selection bias. Each of the $J$ characteristics are embedded in cap-scaled portfolios and then, in a consistent walk-forward scheme, net-of-cost returns are tested for significantly positive alphas after adjusting for multiple testing with the Benjamini-Hochberg procedure. The first screen uses an 81-month expanding estimation window. Figure~\ref{fig:bh_eligibility}, presented with the other figures at the end of the manuscript, shows eligibility for all screened signals and dates.
 
+\subsection{Fund sample}
+
+The human-manager panel combines daily returns, assets under management (AUM), net flows, investor counts, cadastral attributes, and partial holdings for Brazilian equity funds. Terminated funds remain in the data: of the 701 funds matched across the four daily panels, 245 were classified as cancelled at the cadastral snapshot. Retaining their histories reduces the survivorship bias that would arise if the machine were compared only with managers that remained active through July 2026.
+
+The upstream universe was restricted to domestically focused equity funds without an ANBIMA investment restriction. Funds focused on overseas investment and strategies identified as Long Short or Long Biased were excluded, as were funds classified as leveraged, that is, permitted to maintain exposure above NAV. Feeder and mirror vehicles were removed when they duplicated another in-sample return series, and multi-manager funds were excluded because their returns reflect allocation across underlying managers rather than a single stock-selection process. The no-restriction screen refers to the ANBIMA investment-restriction field; the separate investor-audience classification is retained and distinguishes general, qualified, and professional investors in the gap analysis.
+
+Figure~\ref{fig:fund_industry} summarizes the resulting sample. Observed AUM rises from BRL 20.2 billion in December 2015 to a peak of BRL 159.7 billion in August 2021, before declining to BRL 68.5 billion in July 2026, 57\% below the peak. These levels combine capital flows, portfolio returns, entry and exit, and changes in reporting coverage, and should therefore not be read as a pure demand measure. Net subscriptions are more informative about the capital-allocation cycle: cumulative sample flows peak at BRL 80.5 billion in October 2020, whereas subsequent net redemptions reduce the cumulative total to BRL $-3.0$ billion by July 2026.
+
+The cross-section is also heterogeneous. Across the regression sample, the median redemption notice is three days, with a 10th--90th percentile range of two to 32 days; the corresponding management-fee range is 0.03\%--2.00\% per year around a median of 0.80\%. The median minimum implied number of holdings is 22, with a 10th--90th percentile range of 11--35. Manager concentration is moderate rather than constant: the AUM-share HHI ranges from 0.039 to 0.071 and equals 0.051 in July 2026. Bank-affiliated managers account for 46.6\% of sample AUM on average across observed dates, compared with 53.4\% for independent managers; the July 2026 shares are 46.2\% and 53.8\%, respectively.
+
 
 \subsection{Choosing $g()$}
 As mentioned, ML literature provides options to approximate $g^{*}()$. Typically, for a given $g(\mathbf{z_{i,t}}, \mathbf{\theta})$ associated to model $m = 1, \ldots, M$, one must decide on the model's complexity $P_{m}/N$, where $P_{m}$ is the length of the parameters vector $\mathbf{\theta_{m}} = (\theta_{m,1}, \theta_{m,2}, \ldots, \theta_{m, P_{m}})$.
@@ -781,6 +791,8 @@ MVO\_BOX addresses concentration and trading feasibility directly. It applies th
 \input{../figures/hyperparameters_over_time_figure.tex}
 
 \input{../figures/bh_eligibility_figure.tex}
+
+\input{../figures/fund_industry_descriptives_figure.tex}
 
 \input{../figures/feature_importance_figures.tex}
 
