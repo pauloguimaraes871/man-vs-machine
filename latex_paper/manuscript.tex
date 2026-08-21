@@ -470,105 +470,9 @@ Various methods, including linear combinations and stacked ensembles, can be use
 
 ML forecasts define the eligible universe as the upper prediction quantile range. For the Ibovespa mandate, this is the top tercile, $[0.67,1]$, rather than a quartile. Portfolio backtests begin in November 2015 and rebalance in February, April, May, August, and November. We compare three heuristic allocations (EW, SW, and CS), risk parity (RP), box-constrained risk parity (RP\_BOX), hierarchical risk parity (HRP), mean--tracking-error optimization (MVO), and its constrained counterpart (MVO\_BOX). The portfolio methods are summarized here; implementation details are reported in Appendix~\ref{app:algorithmic}.
 
-All covariance-based allocations use a 126-trading-day covariance matrix of active stock returns relative to the mandate benchmark, estimated by constant-correlation shrinkage \citep{ledoitwolf2003,ledoitwolf2004}. MVO uses 50 resamples with perturbations to expected-return scores and covariance eigenvalues to reduce sensitivity to input uncertainty \citep{michaud1989}. All portfolio combinations apply the same liquidity floor and transaction-cost specification: 7 bps direct cost, R\$150 million strategy AUM, square-root market impact ($\alpha=0.5$), and dynamic impact scaling. RP\_BOX imposes a 5\% absolute active-weight limit. MVO\_BOX retains that 5\% limit and additionally applies a 10\% quantile-range buffer and turnover caps of 1\% for micro-caps and 2.5\% for small-caps.
-
-\iffalse
+All covariance-based allocations are configured with a 126-trading-day lookback for active stock returns relative to the mandate benchmark and use constant-correlation shrinkage \citep{ledoitwolf2003,ledoitwolf2004}. MVO uses 50 resamples with perturbations to expected-return scores and covariance eigenvalues to reduce sensitivity to input uncertainty \citep{michaud1989}. All portfolio combinations apply the same liquidity floor and transaction-cost specification: 7 bps direct cost, R\$150 million strategy AUM, square-root market impact ($\alpha=0.5$), and dynamic impact scaling. RP\_BOX imposes a 5\% absolute active-weight limit. MVO\_BOX retains that 5\% limit and additionally applies a 10\% quantile-range buffer and turnover caps of 1\% for micro-caps and 2.5\% for small-caps.
 
 
-\subsubsection{Heuristic Portfolios}
-
-Initial portfolios utilize heuristic methods like Equal-Weighted (EW), Signal-Weighted (SW), Capitalization-Weighted (CW), and Capitalization-Scaled (CS). These methods do not rely on the covariance matrix for weight determination \citep{ghayurheaneyplatt2019}. Weights for EW, SW, CW, and CS are as follows:
-
-\begin{equation}
-w_{s,EW} = 1/S
-\end{equation}
-
-\begin{equation}
-w_{s,SW} = \frac{Z(\widehat{EXR}_{s,t+h})}{\sum_{s \in S}Z(\widehat{EXR}_{s,t+h})}
-\end{equation}
-
-\begin{equation}
-w_{s,CW} = \frac{Z(C_{s,t})}{\sum_{s \in S}Z(C_{s,t})}
-\end{equation}
-
-\begin{equation}
-w_{s,CS} = \frac{Z(C_{s,t})Z(\widehat{EXR}_{s,t+h})}{\sum_{s \in S}C(\widehat{EXR}_{s,t})Z(\widehat{EXR}_{s,t+h})}
-\end{equation}
-
-where $Z$ calculates z-score of a variable and $C_{s,t}$ is trading volume. Except for EW, all allocation schemes employed ML returns to determine weights, but neither used risk measures.
-
-\subsubsection{Risk-Parity Portfolios}
-For remaining portfolios, covariance matrix $\Sigma_{t}$ was estimated, considering three options: sample ($\widehat{\Sigma}_{SAM,t}$), PCA ($\widehat{\Sigma}_{PCA,t}$), and Shrinkage ($\widehat{\Sigma}_{S,t}$) toward the constant correlation target matrix. Linear shrinkage intensity followed \citet{ledoitwolf2003, ledoitwolf2004}. In case of $\widehat{\Sigma}_{PCA,t}$, number of factors was set to $log(S)$ \citep{coqueretmilhau2014}.
-
-$\widehat{\Sigma}_{SAM,t}$ is prone to significant estimation error due to high dimensionality, rendering it unstable. Increasing sample size can be detrimental to out-of-sample performance due to parameter shifting, hence making $\widehat{\Sigma}_{PCA,t}$ and $\widehat{\Sigma}_{S,t}$ better alternatives \citep{ledoitwolf2020, coqueretmilhau2014}. This way, at each rebalancing, the sample for estimating ${\Sigma}_{t}$ comprised 720 trading days.
-
-Risk-parity (RP) portfolios frequently outperform optimal mean-variance portfolios in a long-only context, raising their popularity \citep{chavesetal2011}. Given estimated portfolio volatility $\widehat{\sigma}(\mathbf{w_{t}}) = \sqrt{\mathbf{w_{t}}^{T}\widehat{\Sigma_{t}}\mathbf{w_{t}}}$, risk-parity equalizes risk contribution $RC_{s}$ of stock $s$ across S \citep{spinu2013}.
-
-\begin{equation}
-RC_{s,t} = \frac{w_{s,t}(\widehat{\Sigma}_{t}\mathbf{w_{t}})_{s}}{\sqrt{\mathbf{w_{t}^{T}}\widehat{\Sigma_{t}}\mathbf{w_{t}}}} = \frac{1}{S}\widehat{\sigma}(\mathbf{w_{t}})
-\end{equation}
-
-With long-only and full-investment constraints, weights are given by the vanilla convex formulation: 
-
-\begin{equation}
-\argmin_{\mathbf{x_{t}} \geq 0} \frac{1}{2}\mathbf{x_{t}}^{T}\widehat{\Sigma}_{t}\mathbf{x_{t}} - \mathbf{w_{t}}^{T}log(\mathbf{x_{t}})
-\end{equation}
-
-where $\mathbf{x_{t}} = \frac{\mathbf{w_{t}}}{\sqrt{\mathbf{w_{t}^{T}}\widehat{\Sigma_{t}}\mathbf{w_{t}}}}$. 
-
-
-The risk-parity portfolio was computed, one to each $\widehat{\Sigma_{t}}$. While heuristic portfolios don't incorporate risk in setting weights, risk-parity portfolios don't consider ML expected returns, except for investable set formulation.
-
-\subsubsection{Optimal Mean-Tracking Error Portfolios}
-Adapting Modern Portfolio Theory (MPT) framework to relative risk and return inputs gives the following Information Ratio (IR) maximization problem:
-
-\begin{equation}
-\argmax_{\mathbf{w_{t}}} \frac{\mathbf{w_{t}^{T}}\widehat{EXR}_{t+h}}{\sqrt{\mathbf{w_{t}^{T}}\widehat{\Sigma_{t}}\mathbf{w_{t}}}} 
-\end{equation}
-
-This gives the tangency portfolio in Mean Tracking-Error (MTO) domain.
-
-However, an unrestricted MTO\_UNC approach (except for long-only and full-investment constraints) might lead to significant concentration and corner solutions, a recognized limitation of MPT. Additionally, it fails to incorporate many real-life conditions faced by equity managers.
-
-Therefore, a constrained MTO\_CON version was also explored, with box, turnover, and sector constraints chosen to simulate performance under more realistic risk and trading control rules:
-
-\begin{enumerate}
-\item \textbf{Upper Box Constraints:}
-\begin{enumerate}
-    \item Regular stocks:
-\\ $w_{s,t} \leq w_{s,b,t} + 0.03$
-    \item Stocks included only because $w_{s,b,t} \geq 0.03$:
-\\ $w_{s,t} \leq w_{s,b,t} + 0.02$
-    \item Small-caps ($Z(C_{s,t}) \leq Q_{10}(Z(C_{t}))$:
-\\ $w_{s,t} \leq w_{s,b} + 0.025$
-    \item Micro-caps ($Z(C_{s,t}) \leq Q_{3}(Z(C_{t}))$:
-\\ $w_{s,t} \leq w_{s,b,t} + 0.0075$
-\end{enumerate}
-
-\item \textbf{Lower Box Constraints:}
-\begin{enumerate}
-    \item Regular stocks:
-\\ $w_{s,t} \geq max(w_{s,b,t} - 0.02,0)$
-    \item Stocks included only because of $w_{s,b,t} \geq 0.03$, but that belong to bottom forecast quintile:
-\\ $w_{s,t} \geq max(w_{s,b,t} - 0.03,0)$
-\end{enumerate}
-\item \textbf{Turnover Constraints:}
-\begin{enumerate}
-    \item Small-caps:
-\\ $\left| w_{s,t} - w_{s,t-1} \right| \leq 0.015$ 
-    \item Micro-caps:
-\\ $\left| w_{s,t} - w_{s,t-1} \right| \leq 0.005$ 
-
-\end{enumerate}
-\item \textbf{Sector Constraint:}
-\begin{enumerate}
-    \item $ \left| \sum_{s \in Sector S} w_{s,t} - w_{s,b,t} \right| \leq 0.05$
-\end{enumerate}
-\end{enumerate}
-
-Additionally, for stocks with volatility in 95, 97,5 and 99 quantiles, max active weights were multiplied by 0.75, 0.50 or 0, respectively. 
-
-\fi
 
 \section{Results}
 In this section, results on ML models' out-of-sample predictive performance and portfolio performance are presented.
@@ -744,11 +648,124 @@ The cross-model ensemble forecast is the equal-weighted mean of its constituent 
 
 \subsection{Portfolio Construction}
 
-At each rebalance, the forecast determines the eligible assets through the mandate-specific upper prediction quantile range; for the Ibovespa mandate, the range $[0.67,1]$ retains the top tercile. EW assigns equal weights, SW scales weights by the standardized forecast, and CS combines standardized forecasts with capitalization. RP and RP\_BOX are computed with the native risk-parity formulation in the \texttt{riskParityPortfolio} package. HRP follows \citet{lopezdeprado2016}: it hierarchically clusters the covariance-derived distance matrix, quasi-diagonalizes the asset ordering, and recursively allocates capital across clusters.
+\subsubsection{Portfolio Formation and Common Inputs}
 
-For RP, HRP, and MVO, the covariance input is the 126-trading-day active-return covariance matrix relative to the selected benchmark. It is estimated by linear shrinkage toward a constant-correlation target \citep{ledoitwolf2003,ledoitwolf2004}. MVO searches 1,000 sampled random portfolios for the maximum active Sharpe ratio. The procedure is repeated over 50 resamples, jittering expected-return scores by 0.5 and covariance eigenvalues by 0.25, and averages across the resulting solutions. This resampling addresses the sensitivity of mean--variance allocations to estimated inputs \citep{michaud1989}.
+Let $\mathcal{S}_{t}$ denote the investable set at formation date $t$. The ML forecast is first used to rank stocks within each mandate. The Ibovespa specification retains the upper prediction quantile range,
+\begin{equation}
+\mathcal{S}_{t}=\left\{s:\widehat{EXR}_{s,t+h}\geq
+Q_{0.67}\left(\widehat{EXR}_{t+h}\right)\right\},
+\end{equation}
+which is the top tercile rather than a quartile. Forecasts affect all portfolios through this eligibility rule. Their magnitudes also enter SW, CS, MVO, and MVO\_BOX, whereas RP, RP\_BOX, and HRP use the forecasts only to determine $\mathcal{S}_{t}$.
 
-All portfolio configurations apply the same micro-cap liquidity floor and the same cost model: a 7 bps direct trading cost, strategy AUM of R\$150 million, square-root impact with $\alpha=0.5$, and dynamic $\lambda$. RP\_BOX applies $|w_i-w_{b,i}|\leq 0.05$. MVO\_BOX applies the same active-weight limit, retains a 10\% quantile-range buffer, and caps turnover at 1\% for micro-caps and 2.5\% for small-caps. These constraints are part of the MVO\_BOX implementation, not generic restrictions imposed on every portfolio.
+The base-learner out-of-sample window begins in June 2015. The six-period meta-model buffer places the first portfolio formation date in November 2015. Portfolios rebalance in February, April, May, August, and November, thereby concentrating trades around the arrival of accounting information while limiting unnecessary turnover. All specifications are long-only and fully invested. The liquidity floor excludes stocks below the micro-cap threshold defined in Section~\ref{sec:methods}.
+
+The covariance-based methods use active daily returns relative to the mandate benchmark. The covariance matrix is estimated with the configured 126-day lookback and linear shrinkage toward a constant-correlation target \citep{ledoitwolf2003,ledoitwolf2004}. A sample covariance matrix is particularly sensitive to estimation error when the cross-section is large relative to the available history; extending the window indefinitely is also unattractive when return dependence changes over time. Constant-correlation shrinkage provides a more stable compromise between sampling variation and a parsimonious target. The same estimator is supplied to RP, RP\_BOX, HRP, MVO, and MVO\_BOX. All eight portfolio methods also use the same transaction-cost parameters: a 7 bps direct cost, strategy AUM of R\$150 million, square-root market impact with $\alpha=0.5$, and dynamic impact scaling \citep{barra1997}.
+
+\subsubsection{Heuristic Portfolios}
+
+The heuristic portfolios are Equal-Weighted (EW), Signal-Weighted (SW), and Cap-Scaled (CS). They do not use the covariance matrix to determine weights \citep{ghayurheaneyplatt2019}. They therefore provide transparent benchmarks for separating gains from stock selection from gains that may arise through explicit risk modelling. Let $q_{s,t}$ denote the positive expected-return score passed to portfolio construction and let $c_{s,t}$ denote the transformed inflation-adjusted three-month average daily trading value. For $s\in\mathcal{S}_{t}$, weights are
+\begin{align}
+w_{s,t}^{EW} &= \frac{1}{|\mathcal{S}_{t}|},\\
+w_{s,t}^{SW} &= \frac{q_{s,t}}{\sum_{j\in\mathcal{S}_{t}}q_{j,t}},\\
+w_{s,t}^{CS} &= \frac{q_{s,t}c_{s,t}}
+{\sum_{j\in\mathcal{S}_{t}}q_{j,t}c_{j,t}}.
+\end{align}
+The capacity score $c_{s,t}$ is obtained by winsorizing the liquidity metric at the 2.5th and 97.5th percentiles, standardizing it, and applying a positive monotone transformation. Thus, SW and CS use both forecast rank and forecast magnitude, while EW uses only the eligible set.
+
+\subsubsection{Risk-Parity Portfolios}
+
+Risk-parity portfolios are widely used in long-only applications because they avoid direct estimation of expected returns and distribute portfolio risk rather than capital uniformly \citep{chavesetal2011}. Risk parity assigns the same risk budget $b_s=1/|\mathcal{S}_{t}|$ to each eligible stock. With covariance matrix $\widehat{\boldsymbol{\Sigma}}_{t}$, the component contribution of stock $s$ to portfolio variance is
+\begin{equation}
+r_{s,t}=w_{s,t}
+\left(\widehat{\boldsymbol{\Sigma}}_{t}\mathbf{w}_{t}\right)_{s}.
+\end{equation}
+The equal-risk-budget conditions are
+\begin{equation}
+w_{s,t}\left(\widehat{\boldsymbol{\Sigma}}_{t}\mathbf{w}_{t}\right)_{s}
+=b_s\mathbf{w}_{t}^{T}\widehat{\boldsymbol{\Sigma}}_{t}\mathbf{w}_{t},
+\qquad s\in\mathcal{S}_{t}.
+\end{equation}
+
+For RP, the implementation follows the convex formulation of \citet{spinu2013}. Defining
+$\mathbf{x}_{t}=\mathbf{w}_{t}/
+\sqrt{\mathbf{w}_{t}^{T}\widehat{\boldsymbol{\Sigma}}_{t}\mathbf{w}_{t}}$,
+the package solves
+\begin{equation}
+\underset{\mathbf{x}_{t}>0}{\operatorname{minimize}}\quad
+\frac{1}{2}\mathbf{x}_{t}^{T}\widehat{\boldsymbol{\Sigma}}_{t}\mathbf{x}_{t}
+-\mathbf{b}^{T}\log(\mathbf{x}_{t}),
+\end{equation}
+and recovers portfolio weights as
+$\mathbf{w}_{t}=\mathbf{x}_{t}/(\mathbf{1}^{T}\mathbf{x}_{t})$.
+The selected \texttt{cyclical-spinu} algorithm updates one coordinate at a time. If
+$a_{s,t}=\sum_{j\neq s}\widehat{\Sigma}_{sj,t}x_{j,t}$, its positive coordinate update is
+\begin{equation}
+x_{s,t}\leftarrow
+\frac{-a_{s,t}+
+\sqrt{a_{s,t}^{2}+4\widehat{\Sigma}_{ss,t}b_s}}
+{2\widehat{\Sigma}_{ss,t}}.
+\end{equation}
+These updates continue until the objective tolerance is satisfied, after which the vector is normalized to sum to one \citep{cardosopalomar2021}.
+
+RP\_BOX is a different numerical problem rather than the same closed-form allocation with weights clipped afterward. Its feasible set imposes the benchmark-relative bounds
+\begin{equation}
+\max\{w_{s,b,t}-0.05,0\}\leq w_{s,t}\leq
+\min\{w_{s,b,t}+0.05,1\},
+\qquad \mathbf{1}^{T}\mathbf{w}_{t}=1.
+\end{equation}
+The unconstrained cyclical solution provides the initial point. Because the bounds move the problem outside the package's vanilla branch, the implementation then uses successive convex approximation to minimize
+\begin{equation}
+R(\mathbf{w}_{t})=
+\sum_{s\in\mathcal{S}_{t}}
+\left[
+\frac{w_{s,t}
+\left(\widehat{\boldsymbol{\Sigma}}_{t}\mathbf{w}_{t}\right)_{s}}
+{\mathbf{w}_{t}^{T}\widehat{\boldsymbol{\Sigma}}_{t}\mathbf{w}_{t}}
+-b_s
+\right]^2
+\end{equation}
+over the bounded simplex. At each iteration, the risk-concentration residuals are locally approximated, a proximal quadratic program is solved under the box and budget constraints, and the weights are updated with a damped step. This is the constrained procedure described by \citet{fengpalomar2015} and implemented in \texttt{riskParityPortfolio}, rather than an ex-post truncation of vanilla RP.
+
+\subsubsection{Hierarchical Risk Parity}
+
+HRP follows \citet{lopezdeprado2016}. The implementation first converts the shrunk correlation matrix into the distance matrix
+\begin{equation}
+d_{ij,t}=\sqrt{\frac{1-\rho_{ij,t}}{2}},
+\end{equation}
+and applies single-linkage hierarchical clustering to the Euclidean distances between the rows of $\mathbf{D}_{t}$. The resulting dendrogram determines a quasi-diagonal ordering. Recursive bisection then divides the ordered assets into two clusters. Within each cluster $C$, inverse-variance weights are used to estimate cluster variance,
+\begin{equation}
+\widetilde{\mathbf{w}}_{C}\propto
+\operatorname{diag}\left(\widehat{\boldsymbol{\Sigma}}_{C,t}\right)^{-1},
+\qquad
+\widehat{\sigma}^{2}_{C,t}=
+\widetilde{\mathbf{w}}_{C}^{T}
+\widehat{\boldsymbol{\Sigma}}_{C,t}
+\widetilde{\mathbf{w}}_{C}.
+\end{equation}
+For left and right clusters $L$ and $R$, the capital share assigned to $L$ is
+\begin{equation}
+\alpha_{L,t}=
+\frac{\widehat{\sigma}^{2}_{R,t}}
+{\widehat{\sigma}^{2}_{L,t}+\widehat{\sigma}^{2}_{R,t}},
+\end{equation}
+with $1-\alpha_{L,t}$ assigned to $R$. The procedure is repeated until each branch contains one stock. HRP therefore uses the ML model for eligibility but not as an expected-return tilt.
+
+\subsubsection{Optimal Mean--Tracking-Error Portfolios}
+
+MVO adapts the mean--variance tangency portfolio to benchmark-relative expected returns and risk. For eligible stocks, the objective is
+\begin{equation}
+\underset{\mathbf{w}_{t}}{\operatorname{maximize}}\quad
+\frac{\mathbf{w}_{t}^{T}\widehat{\mathbf{q}}_{t+h}}
+{\sqrt{\mathbf{w}_{t}^{T}
+\widehat{\boldsymbol{\Sigma}}_{t}\mathbf{w}_{t}}},
+\qquad
+\mathbf{1}^{T}\mathbf{w}_{t}=1,\quad \mathbf{w}_{t}\geq0,
+\end{equation}
+where $\widehat{\mathbf{q}}_{t+h}$ is the vector of ML expected-return scores. This is the tangency allocation in mean--tracking-error space. Its economic appeal is accompanied by a familiar practical limitation: estimated tangency portfolios can be highly concentrated and unstable because expected returns and covariances are measured with error. The implementation samples 1,000 feasible random portfolios and retains the portfolio with the largest expected active Sharpe ratio.
+
+To reduce sensitivity to estimation error, this search is repeated under 50 perturbed input sets \citep{michaud1989}. Expected-return scores receive independent Gaussian noise with standard deviation $0.5$ times the cross-sectional standard deviation of the score. The covariance eigenvectors are retained, while each eigenvalue is multiplied by an independent lognormal perturbation $\exp(\varepsilon)$, with $\varepsilon\sim N(0,0.25^2)$. The reported allocation is the equal-weighted average of the base solution and the 50 perturbed solutions.
+
+MVO\_BOX addresses concentration and trading feasibility directly. It applies the same benchmark-relative 5\% individual-weight bounds as RP\_BOX, retains a 10\% quantile-range buffer, and restricts changes around beginning-of-period weights to 1\% for micro-caps and 2.5\% for small-caps. These are the restrictions implemented in the current specification; it does not impose the sector constraints or volatility-quantile adjustments considered in earlier drafts.
 
     \section{Tables and Figures}
 

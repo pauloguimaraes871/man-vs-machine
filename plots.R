@@ -646,31 +646,56 @@ if (is.null(bh_ss_results)) {
 bh_signal_universe <- bh_ss_results@signal_universe_m_df
 bh_signal_universe@data <- bh_signal_universe@data %>%
   dplyr::filter(.data$theme != "forced") %>%
+  dplyr::arrange(.data$theme, .data$tickers, .data$dates) %>%
   dplyr::mutate(
-    eligibility = dplyr::if_else(.data$is_eligible == 1, "elected", "not elected")
+    # "tickers" is the package's storage name for characteristic identifiers.
+    # Use a display variable so no figure label describes them as stock tickers.
+    signals = factor(.data$tickers, levels = unique(.data$tickers)),
+    eligibility = dplyr::if_else(
+      .data$is_eligible == 1, "Elected", "Not elected"
+    )
   )
 
-grDevices::pdf(NULL)
-plot(
-  bh_signal_universe,
-  type = "tile_heatmap",
-  clustering_variables = "tickers",
-  variable = "eligibility",
-  calc_stat = "mean",
-  tickers = "all",
-  dates = sort(unique(bh_signal_universe@data$dates)),
-  palette = "journal"
-)
-bh_eligibility_plot <- ggplot2::last_plot()
-grDevices::dev.off()
-
-bh_eligibility_plot <- bh_eligibility_plot +
+bh_eligibility_plot <- ggplot2::ggplot(
+  bh_signal_universe@data,
+  ggplot2::aes(x = .data$dates, y = .data$signals, fill = .data$eligibility)
+) +
+  ggplot2::geom_tile(color = "white", linewidth = 0.08) +
+  ggplot2::facet_grid(
+    rows = ggplot2::vars(.data$theme),
+    scales = "free_y",
+    space = "free_y"
+  ) +
+  ggplot2::scale_fill_manual(
+    values = c("Elected" = "#C51B33", "Not elected" = "#1F4E79")
+  ) +
+  ggplot2::scale_x_date(
+    date_breaks = "3 years",
+    date_labels = "%Y",
+    expand = ggplot2::expansion(mult = c(0, 0))
+  ) +
+  ggplot2::theme_minimal(base_size = 10) +
   ggplot2::labs(
-    title = "Signal eligibility through time",
-    subtitle = "Annual Benjamini--Hochberg screens; all signals",
+    title = "Benjamini--Hochberg signal eligibility",
+    subtitle = "All signals and annual screening dates",
     x = "Screening date",
     y = "Signals",
     fill = "Eligibility"
+  ) +
+  ggplot2::theme(
+    axis.text.y = ggplot2::element_text(size = 10),
+    axis.text.x = ggplot2::element_text(size = 9),
+    axis.title = ggplot2::element_text(size = 11),
+    legend.text = ggplot2::element_text(size = 9),
+    legend.title = ggplot2::element_text(size = 10),
+    plot.title = ggplot2::element_text(size = 16),
+    plot.subtitle = ggplot2::element_text(size = 10),
+    panel.grid = ggplot2::element_blank(),
+    panel.spacing.y = grid::unit(1.5, "mm"),
+    strip.text.y = ggplot2::element_text(angle = 0, size = 8),
+    strip.background = ggplot2::element_rect(fill = "grey92", color = NA),
+    legend.position = "bottom",
+    plot.margin = ggplot2::margin(4, 4, 4, 2)
   )
 
 ggplot2::ggsave(
@@ -689,7 +714,7 @@ bh_eligibility_figure_tex <- latex_figure(
     "window. All available characteristics and screening dates are shown."
   ),
   "fig:bh_eligibility",
-  include_options = "width=0.70\\linewidth,height=0.90\\textheight,keepaspectratio"
+  include_options = "width=0.70\\linewidth,height=0.85\\textheight,keepaspectratio"
 )
 writeLines(
   bh_eligibility_figure_tex,
