@@ -479,15 +479,15 @@ In this section, results on ML models' out-of-sample predictive performance and 
 
 \subsection{Expected Returns Model}
 
-Table \ref{summarystats} presents summary statistics for out-of-sample forecasting errors. While OLS exhibited the highest RMSE, ML methods generally yielded superior results due to the introduction of shrinkage and non-linearities. The equal-weighted ensemble had the lowest RMSE overall, with RF emerging as the best individual performer.
+Table \ref{summarystats} reports the consolidated out-of-sample metrics for each base learner from June 2015 to July 2026. NN2 has the lowest RMSE (23.020), MAE (15.215), pseudo-Huber error (14.314), and median pinball error (7.608), as well as the highest $R_{OOS}^{2}$ (0.0112). OLS is the only model with negative $R_{OOS}^{2}$ ($-0.0050$) and has the highest value of every level-error measure. Regularization and nonlinear functional forms therefore improve forecast accuracy, but the magnitude is modest: relative to OLS, NN2 reduces RMSE by approximately 0.8\%.
 
-Table \ref{summarystats} also presents $R_{OOS}^{2}$ and MAPE. OLS performed poorly in terms of both measures, with a negative value for $R_{OOS}^{2}$, thus aligning with results of \citet{gukellyxiu2020} and \citet{hanauerkalsbach2023}. The introduction of regularization methods and flexible functional forms leads to significant improvement in this metric.
+The ranking is not uniform across criteria. XGB has the lowest MAPE (1.624), NN1 the highest directional hit rate (0.523), and NN3 the highest forecast--target cross-product (6.805). Hit rates nevertheless remain close to 50\%, and all models have negative mean bias under the convention $e=y-\widehat{y}$, indicating average overprediction between 0.645 and 1.318 percentage points. NN3 is somewhat less accurate than NN2 on the level-error measures, consistent with the limited benefit of adding depth in this sample \citep{kellyxiu2023}. These results qualify the economic interpretation of the positive $R_{OOS}^{2}$ values: flexible models improve average fit, but the gains are small and metric-dependent.
 
-Particularly, ANN showed good performance for the first two architecture choices, declining for ANN3. This also aligns with literature's findings of shallow outperforming deep learning in return prediction \citep{kellyxiu2023}. 
+The equal-weighted meta-model is not included in Table \ref{summarystats}, which is constructed from the seven base-learner objects and their common June 2015 starting date. The meta-model begins in November 2015 after its initial buffer. Over the common period its $R_{OOS}^{2}$ is slightly negative ($-0.0022$), and it does not dominate the leading base learners in point-forecast accuracy. Its use in portfolio construction is therefore a pre-specified forecast-diversification choice that avoids ex ante model selection, rather than a choice based on superior consolidated prediction metrics.
 
-The equal-weighted ensemble also displayed the best $R^{2}_{OOS}$ overall, making it the preferred choice for portfolio construction.
+Figure \ref{fig:hyper_time} reports the settings recorded at each annual walk-forward refit. The figure includes both searched parameters and fixed training choices. The constant paths for RF's 500 trees and minimum leaf size of five; XGB's minimum child weight of one, row and feature subsampling rates of 0.8, and zero split penalty; and the neural networks' 25\% dropout, 100 epochs, batch size of 256, and zero L2 penalty are design controls, not repeated validation outcomes.
 
-Figure \ref{fig:hyper_time} illustrates hyperparameter choice for each rebalancing. For certain models, like ENET, there was minimal variation, while for others, there was more heterogeneity.
+The parameters selected by validation vary materially. RF changes tree depth and feature subsampling, while XGB alternates among different depths, boosting rounds, learning rates, and early-stopping iterations. ENET moves between pure L1 and mixed L1/L2 solutions and selects progressively lower penalty-path floors late in the sample. The neural networks also switch among discrete learning-rate and L1-penalty values. There is no monotonic movement toward greater model complexity. The variation supports repeated walk-forward tuning in a changing sample, although it may also reflect noise from a finite validation window and should not be interpreted by itself as evidence of structural breaks.
 
 Finally, Figures \ref{fig:fi_bar}--\ref{fig:surrogate_fit} report the GSM-based importance summaries: theme-level loadings, their evolution over time, and the share of each model's predictions reproduced by its linear surrogate.
 
@@ -499,7 +499,7 @@ Overall, among 39 most important features, there were 8 in Value (47\%), 6 in Mo
 
 
 \subsection{ML Portfolios Performance}
-As mentioned, portfolios used the equal-weighted all-model ensemble as the expected-returns model, due to its superiority in $R^{2}_{OOS}$. We evaluate eight portfolio-construction schemes: EW, SW, CS, RP, RP\_BOX, HRP, MVO, and MVO\_BOX. The covariance-based schemes use the common constant-correlation shrinkage estimator described in Appendix~\ref{app:algorithmic}.
+Portfolios use the pre-specified equal-weighted all-model ensemble as the expected-returns model to diversify model-specific estimation error without fitting an additional combination rule. We evaluate eight portfolio-construction schemes: EW, SW, CS, RP, RP\_BOX, HRP, MVO, and MVO\_BOX. The covariance-based schemes use the common constant-correlation shrinkage estimator described in Appendix~\ref{app:algorithmic}.
 
 To assess out-of-sample ML performance, the cap-weighted IBOV index was used as the equity benchmark and the CDI as the risk-free benchmark. Fund, IBOV and CDI daily simple returns were geometrically compounded over each interval from the day after the previous calendar 15th through the current calendar 15th, matching the ML backtest endpoints.
 
@@ -541,7 +541,7 @@ In this study, various ML methods were employed to forecast market-relative cros
 
 Contrary to other areas where ML has been successful, financial data exhibit non-stationarity and structural breaks, calling for the adoption of a Walk-Forward validation-scheme. 
 
-Regularized and nonlinear models demonstrated higher predictive performance than OLS, with positive $R^{2}_{OOS}$. The equal-weighted all-model ensemble was the most accurate specification. Its predictions were then used as expected-return inputs in diverse long-only portfolio-construction methods, encompassing heuristics, risk parity and MTO.
+Regularized and nonlinear models improved predictive performance relative to OLS, although the gains were small and depended on the evaluation metric. NN2 was the most accurate base learner on the primary level-error measures and $R^{2}_{OOS}$. The equal-weighted all-model ensemble was used as a pre-specified diversification device, and its predictions served as expected-return inputs in long-only portfolio-construction methods encompassing heuristics, risk parity and MTO.
 
 %HK.
 % Insert two paragraphs explaining contributions and implications of the study for theory and practice or practitioners. (paragraph should be different from the one in the Introduction, and should highlight why the study is different from others.
@@ -689,7 +689,7 @@ w_{s,t}\left(\widehat{\boldsymbol{\Sigma}}_{t}\mathbf{w}_{t}\right)_{s}
 For RP, the implementation follows the convex formulation of \citet{spinu2013}. Defining
 $\mathbf{x}_{t}=\mathbf{w}_{t}/
 \sqrt{\mathbf{w}_{t}^{T}\widehat{\boldsymbol{\Sigma}}_{t}\mathbf{w}_{t}}$,
-the package solves
+the optimization problem is
 \begin{equation}
 \underset{\mathbf{x}_{t}>0}{\operatorname{minimize}}\quad
 \frac{1}{2}\mathbf{x}_{t}^{T}\widehat{\boldsymbol{\Sigma}}_{t}\mathbf{x}_{t}
@@ -705,7 +705,7 @@ x_{s,t}\leftarrow
 \sqrt{a_{s,t}^{2}+4\widehat{\Sigma}_{ss,t}b_s}}
 {2\widehat{\Sigma}_{ss,t}}.
 \end{equation}
-These updates continue until the objective tolerance is satisfied, after which the vector is normalized to sum to one \citep{cardosopalomar2021}.
+These updates continue until the objective tolerance is satisfied, after which the vector is normalized to sum to one \citep{spinu2013}.
 
 RP\_BOX is a different numerical problem rather than the same closed-form allocation with weights clipped afterward. Its feasible set imposes the benchmark-relative bounds
 \begin{equation}
@@ -713,7 +713,7 @@ RP\_BOX is a different numerical problem rather than the same closed-form alloca
 \min\{w_{s,b,t}+0.05,1\},
 \qquad \mathbf{1}^{T}\mathbf{w}_{t}=1.
 \end{equation}
-The unconstrained cyclical solution provides the initial point. Because the bounds move the problem outside the package's vanilla branch, the implementation then uses successive convex approximation to minimize
+The unconstrained cyclical solution provides the initial point. The box bounds move the problem outside the convex log-barrier formulation above, so the bounded problem is instead solved by successive convex approximation of
 \begin{equation}
 R(\mathbf{w}_{t})=
 \sum_{s\in\mathcal{S}_{t}}
@@ -724,7 +724,7 @@ R(\mathbf{w}_{t})=
 -b_s
 \right]^2
 \end{equation}
-over the bounded simplex. At each iteration, the risk-concentration residuals are locally approximated, a proximal quadratic program is solved under the box and budget constraints, and the weights are updated with a damped step. This is the constrained procedure described by \citet{fengpalomar2015} and implemented in \texttt{riskParityPortfolio}, rather than an ex-post truncation of vanilla RP.
+over the bounded simplex. At each iteration, the risk-concentration residuals are locally approximated, a proximal quadratic program is solved under the box and budget constraints, and the weights are updated with a damped step. This is the successive convex risk-parity procedure of \citet{fengpalomar2015}, rather than an ex-post truncation of the unconstrained solution.
 
 \subsubsection{Hierarchical Risk Parity}
 
@@ -769,41 +769,7 @@ MVO\_BOX addresses concentration and trading feasibility directly. It applies th
 
     \section{Tables and Figures}
 
-\begin{table}[t]
-\centering
-\captionsetup{
-  justification=raggedright, % Left-align the caption
-  labelsep=none,
-  singlelinecheck=false, % Allow multi-line captions
-  labelformat=boldlabel, % Use the custom label format
-}
-\renewcommand{\arraystretch}{1.25}
-\caption[Table 1: \footnotesize ]{\footnotesize \\ \textbf{Summary statistics of out-of-sample predictive performance}. This table displays the following summary statistics of out-of-sample errors and model fit: Root Mean Squared Error (RMSE), Mean Absolute Error (MAE), Mean Pseudo-Huber Error (MPHE), Mean Pinball Error (MPE), Mean Absolute Percentage Error (MAPE), and Out-of-Sample $R^2$ (OOS $R^2$). For error metrics, values closer (further away) to (from) zero are in \textbf{bold} (\underline{underlined}). For OOS $R^2$, the highest (lowest) value is in \textbf{bold} (\underline{underlined}).}  
-\label{summarystats} 
-\footnotesize % Reduce font size further
-\begin{tabularx}{\linewidth}{
-  >{\raggedright\arraybackslash}X
-  >{\centering\arraybackslash}X
-  >{\centering\arraybackslash}X
-  >{\centering\arraybackslash}X
-  >{\centering\arraybackslash}X
-  >{\centering\arraybackslash}X
-  >{\centering\arraybackslash}X
-}
-\hline 
-Model & RMSE & MAE & MPHE & MPE & MAPE & OOS $R^2$ \\
-\hline
-OLS & \underline{22.05} & \underline{15.59} & \underline{14.68} & \underline{7.79} & \underline{3.12} & \underline{-0.0103} \\
-ENET & 21.90 & 15.50 & 14.59 & 7.75 & 1.72 & 0.0026 \\
-RF & 21.84 & 15.45 & 14.55 & 7.72 & 1.79 & 0.0088 \\
-XGB & 21.85 & 15.45 & 14.55 & 7.73 & 1.92 & 0.0069 \\
-ANN1 & 21.92 & 15.49 & 14.59 & 7.75 & 2.77 & 0.0011 \\
-ANN2 & \textbf{21.82} & \textbf{15.41} & \textbf{14.50} & \textbf{7.70} & \textbf{1.50} & \textbf{0.0112} \\
-ANN3 & 21.86 & 15.44 & 14.54 & 7.72 & 1.66 & 0.0068 \\
-ENS & 21.91 & 15.53 & 14.63 & 7.77 & 1.83 & 0.0003 \\
-\hline
-\end{tabularx}
-\end{table}
+\input{../tables/predictive_performance.tex}
 
 \input{../tables/active_performance.tex}
 

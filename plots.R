@@ -67,6 +67,138 @@ learners  <- read_run_bundle("learners_grid.qs")
 screen    <- read_run_bundle("screen.qs")
 ss        <- read_run_bundle("ss.qs")
 
+# ---- Consolidated OOS prediction metrics (Table 1) -------------------------
+# Build the table directly from each current grid-search base learner. The
+# consolidated `cons_oos` column evaluates the complete learner-specific OOS
+# prediction vector, rather than averaging annual evaluation statistics.
+predictive_model_label <- function(name) {
+  toupper(sub("_(grid|bayes)$", "", sub("_f__.*$", "", sub("^c__", "", name))))
+}
+
+predictive_model_order <- c("OLS", "GLMNET", "RF", "XGB", "NN1", "NN2", "NN3")
+predictive_metric_order <- c(
+  "rss", "cp", "rmse", "mae", "mphe", "mpe", "mape", "hr", "mb"
+)
+predictive_sb_list <- mb_grid@base_sb_backtest_results_list
+if (!setequal(vapply(names(predictive_sb_list), predictive_model_label, character(1)),
+              predictive_model_order)) {
+  rlang::abort("The grid bundle does not contain exactly the seven expected base learners.")
+}
+
+predictive_metrics_long <- purrr::imap_dfr(
+  predictive_sb_list,
+  function(result, name) {
+    metrics <- result@consolidated_eval_metrics
+    required_columns <- c("metric", "cons_oos")
+    if (!all(required_columns %in% names(metrics))) {
+      rlang::abort(paste0("Missing consolidated OOS metrics for ", name, "."))
+    }
+    metrics |>
+      dplyr::filter(.data$metric %in% predictive_metric_order) |>
+      dplyr::transmute(
+        model = predictive_model_label(name),
+        metric = .data$metric,
+        value = as.numeric(.data$cons_oos)
+      )
+  }
+)
+if (anyDuplicated(predictive_metrics_long[c("model", "metric")]) ||
+    any(!is.finite(predictive_metrics_long$value)) ||
+    nrow(predictive_metrics_long) !=
+      length(predictive_model_order) * length(predictive_metric_order)) {
+  rlang::abort("The consolidated OOS metric panel is incomplete, duplicated, or non-finite.")
+}
+
+predictive_metrics <- predictive_metrics_long |>
+  tidyr::pivot_wider(names_from = .data$metric, values_from = .data$value) |>
+  dplyr::mutate(
+    model = factor(.data$model, levels = predictive_model_order)
+  ) |>
+  dplyr::arrange(.data$model)
+
+predictive_digits <- c(
+  rss = 4L, cp = 3L, rmse = 3L, mae = 3L, mphe = 3L,
+  mpe = 3L, mape = 3L, hr = 3L, mb = 3L
+)
+predictive_preference <- c(
+  rss = "high", cp = "high", rmse = "low", mae = "low", mphe = "low",
+  mpe = "low", mape = "low", hr = "high", mb = "zero"
+)
+
+format_predictive_metric <- function(metric, value) {
+  values <- predictive_metrics[[metric]]
+  score <- switch(
+    predictive_preference[[metric]],
+    high = values,
+    low = -values,
+    zero = -abs(values)
+  )
+  formatted <- sprintf(paste0("%.", predictive_digits[[metric]], "f"), value)
+  row_index <- which(values == value)
+  if (length(row_index) != 1L) {
+    rlang::abort(paste0("A unique model value was not found for metric ", metric, "."))
+  }
+  if (row_index == which.max(score)) {
+    paste0("\\textbf{", formatted, "}")
+  } else if (row_index == which.min(score)) {
+    paste0("\\underline{", formatted, "}")
+  } else {
+    formatted
+  }
+}
+
+predictive_display_names <- c(
+  OLS = "OLS", GLMNET = "ENET", RF = "RF", XGB = "XGB",
+  NN1 = "NN1", NN2 = "NN2", NN3 = "NN3"
+)
+predictive_table_rows <- vapply(seq_len(nrow(predictive_metrics)), function(i) {
+  model <- as.character(predictive_metrics$model[[i]])
+  cells <- vapply(predictive_metric_order, function(metric) {
+    format_predictive_metric(metric, predictive_metrics[[metric]][[i]])
+  }, character(1))
+  paste0(
+    predictive_display_names[[model]], " & ", paste(cells, collapse = " & "),
+    " ", intToUtf8(92), intToUtf8(92)
+  )
+}, character(1))
+
+predictive_table_tex <- c(
+  "\\begin{table}[t]",
+  "\\centering",
+  "\\captionsetup{justification=raggedright,labelsep=none,singlelinecheck=false,labelformat=boldlabel}",
+  "\\renewcommand{\\arraystretch}{1.15}",
+  paste0(
+    "\\caption[Out-of-sample predictive performance]",
+    "{\\footnotesize \\textbf{: Out-of-sample predictive performance.} ",
+    "The table reports the \\texttt{cons\\_oos} metrics stored for each base learner ",
+    "over June 2015--July 2026. OOS $R^2$ is $1-\\sum e^2/\\sum y^2$; CP is the ",
+    "mean forecast--target cross-product; RMSE, MAE, MPHE and MPE are root mean ",
+    "squared, absolute, pseudo-Huber and median pinball errors; MAPE is mean absolute ",
+    "percentage error; HR is the directional hit rate; and MB is mean bias under ",
+    "$e=y-\\widehat{y}$. Bold denotes the best value and underlining the worst: ",
+    "error metrics and absolute MB are minimized, whereas OOS $R^2$, CP and HR are maximized.}"
+  ),
+  "\\footnotesize",
+  "\\setlength{\\tabcolsep}{1.6pt}",
+  paste0(
+    "\\begin{tabularx}{\\linewidth}{>{\\raggedright\\arraybackslash}m{1.1cm}",
+    "*{9}{>{\\raggedleft\\arraybackslash}X}}"
+  ),
+  "\\hline",
+  paste0(
+    "Model & OOS $R^2$ & CP & RMSE & MAE & MPHE & MPE & MAPE & HR & MB ",
+    intToUtf8(92), intToUtf8(92)
+  ),
+  "\\hline",
+  predictive_table_rows,
+  "\\hline",
+  "\\end{tabularx}",
+  "\\label{summarystats}",
+  "\\end{table}"
+)
+dir.create(here::here("tables"), showWarnings = FALSE)
+writeLines(predictive_table_tex, here::here("tables", "predictive_performance.tex"))
+
 # The mandate whose portfolios every exhibit below is built from. The machine
 # ran four; the paper's figures are the broad-market contest.
 RUN_MANDATE <- "ibov"
@@ -1510,6 +1642,7 @@ jp_hyper <- factoRverse:::.journal_palette()
 hyper_all <- purrr::imap_dfr(sb_list, function(sbr, nm) {
   h <- sbr@best_hyperparameters_m_xts
   if (is.null(h)) return(NULL)
+  h <- restore_meta_xts_dates(h)
   d <- tryCatch(as.data.frame(h@data), error = function(e) NULL)
   if (is.null(d) || nrow(d) == 0 || ncol(d) == 0) return(NULL)
   d$dates <- as.Date(rownames(d))
@@ -1565,7 +1698,7 @@ hyper_plot <- ggplot2::ggplot(
   ggplot2::scale_x_date(labels = scales::date_format("%b-%y")) +
   ggplot2::scale_color_manual(values = hyper_cols, name = NULL) +
   ggplot2::labs(x = NULL, y = NULL,
-                title = "Selected hyperparameters over time, by model") +
+                title = "Hyperparameter settings over time, by model") +
   journal_area_theme()
 
 hyper_height <- max(6, ceiling(length(panel_levels) / hyper_ncol) * 3)
@@ -1576,18 +1709,20 @@ ggplot2::ggsave(here::here("figures", "hyperparameters_over_time.png"),
 # ---- Paste-ready LaTeX for the hyperparameter-over-time figure -------------
 hyperparameters_figure_tex <- latex_figure(
   "hyperparameters_over_time.png",
-  "Selected hyperparameters over time.",
+  "Hyperparameter settings over time.",
   paste(
-    "Tuned hyperparameter values chosen at each walk-forward refit, for",
-    "every tuned ML model (GLMNET, RF, XGB, NN1--NN3; OLS is untuned and omitted).",
-    "Hyperparameters that play the same role across models share a panel and are",
+    "Recorded hyperparameter settings at each walk-forward refit for GLMNET, RF,",
+    "XGB and NN1--NN3; OLS is untuned and omitted. The recorded objects contain both",
+    "searched parameters and fixed training settings. Constant paths therefore",
+    "document design choices rather than repeated validation selections.",
+    "Parameters that play the same role across models share a panel and are",
     "drawn as separate coloured lines: number of trees (RF num.trees, XGB nrounds),",
     "maximum tree depth, minimum leaf size (RF min.bucket, XGB min\\_child\\_weight),",
     "learning rate (XGB eta, NN lr), early-stopping iteration and feature",
     "subsampling (RF mtry, XGB colsample\\_bytree; both fractions of the features",
     "sampled). Model-specific hyperparameters keep their own panels, and the three",
     "neural networks share each remaining NN panel. Points",
-    "are the selected values at each refit date; vertical scales differ across",
+    "are the recorded values at each refit date; vertical scales differ across",
     "panels. Estimated on the individual-signals run."
   ),
   "fig:hyper_time"
