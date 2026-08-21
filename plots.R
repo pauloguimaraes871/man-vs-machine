@@ -1201,10 +1201,10 @@ sector_grid <- plot_composition_grid(
   title = "Weight composition by sector across portfolios"
 )
 liquidity_grid <- plot_composition_grid(
-  pbr_list, "liquidity_classification", value_col = "weights", fill_lab = "Liquidity class",
+  pbr_list, "liquidity_classification", value_col = "weights", fill_lab = "Liquidity-based size class",
   y_lab = "Share of portfolio weight", ncol = 3, group_levels = liquidity_levels,
   bench_value_col = "ibov_bench_weights", bench_label = "IBOV",
-  title = "Weight composition by liquidity class across portfolios"
+  title = "Weight composition by liquidity-based size class"
 )
 
 dir.create(here::here("figures"), showWarnings = FALSE)
@@ -1231,13 +1231,15 @@ composition_figures_tex <- c(
   "",
   latex_figure(
     "composition_liquidity_weight.png",
-    "Portfolio weight composition by market capitalization.",
+    "Portfolio weight composition by liquidity-based size class.",
     paste(
       "Out-of-sample monthly composition of portfolio weight across",
-      "market-capitalization classes (mega, large, mid, small and micro caps),",
+      "liquidity-based size classes (mega, large, mid, small, micro and nano caps),",
       "for each ML-ensemble portfolio-construction scheme and the IBOV benchmark.",
       "Each panel stacks the sum of portfolio weights within each size class to",
-      "100\\% at every rebalance date."
+      "100\\% at every rebalance date. The classes are assigned using inflation-adjusted",
+      "three-month average daily trading value and trading-day participation; they are",
+      "therefore capacity categories rather than direct market-capitalization bins."
     ),
     "fig:comp_mktcap"
   )
