@@ -33,15 +33,19 @@
 # gap is what an investor experiences, the risk-adjusted gap is what survives
 # once the machine's style tilts are priced.
 #
-# Group D variables (decay_slope, n_pos_min, rho_machine, hhi_top15) are
-# MEDIATORS and are deliberately absent from the main right-hand side. They get
-# their own descriptive section.
+# Group D variables (rho_machine and holdings concentration) are mediators and
+# remain absent from the main right-hand side. Specs 7--8 add selected Group D
+# variables only as a descriptive decomposition. Specs 5--6 similarly add
+# lagged flow variables as an endogenous scale/flow extension. Neither block is
+# used to replace or reinterpret the pre-existing Specs 1--4.
 # =============================================================================
 
 suppressPackageStartupMessages({
   library(dplyr); library(tidyr); library(purrr); library(tibble)
   library(ggplot2); library(scales); library(here); library(rlang)
 })
+
+source(here::here("R", "recursive_demeaning_iv.R"), local = FALSE)
 
 PANEL    <- here::here("data", "derived", "gap_panel.qs")
 INDUSTRY <- here::here("data", "derived", "industry_panel.qs")
@@ -166,8 +170,11 @@ est <- s5 %>%
     # benchmarked against the ibov machine like any other unlisted class, and
     # their distinct behaviour enters as plain RHS dummies instead. Same role as
     # mandate_fsmll / mandate_fidiv, but without carving out a benchmark.
-    index_ativo = as.integer(anbima_class == "Ações Índice Ativo"),
-    indexados   = as.integer(anbima_class == "Ações Indexados"),
+    # Match on the unaccented suffix so the controls remain reproducible when a
+    # Windows R session cannot activate a UTF-8 locale. Exact comparisons with
+    # "Ações Índice Ativo" silently returned all FALSE in that environment.
+    index_ativo = as.integer(grepl("ndice Ativo$", anbima_class)),
+    indexados   = as.integer(grepl("Indexados$", anbima_class)),
     perf_fee  = as.integer(perf_fee),
     bank      = as.integer(bank_affiliated),
     efpc      = as.integer(efpc),
@@ -247,6 +254,29 @@ vol_tab <- est %>%
   dplyr::select(mandate, period, vol_rel, high_vol, vol_tercile, vol_regime_f)
 
 est <- dplyr::left_join(est, vol_tab, by = c("mandate", "period"))
+
+# Variables used only in the descriptive extensions below. All return-based
+# measures are known before the return window whose gap they are used to
+# describe. This timing prevents a mechanical contemporaneous relation, but it
+# does not make the measures exogenous: flows can respond to persistent past
+# performance, and risk/concentration are choices through which skill may act.
+est <- est %>%
+  dplyr::arrange(code, period) %>%
+  dplyr::group_by(code) %>%
+  dplyr::mutate(
+    # ra_fund is in percentage points per month. trailing_sd_prior() uses only
+    # t-12,...,t-1 and requires all 12 observations.
+    resid_vol_12 = trailing_sd_prior(ra_fund, window = 12L)
+  ) %>%
+  dplyr::ungroup() %>%
+  dplyr::mutate(
+    # Rescale coefficients to economically readable changes while preserving
+    # the underlying variables and regression fit.
+    flow_rate_lag_10 = flow_rate_lag / 0.10,
+    flow_vol_12_10   = flow_vol_12 / 0.10,
+    rho_machine_10   = rho_machine / 0.10,
+    hhi_top15_01     = hhi_top15 / 0.01
+  )
 
 local({
   v <- vol_tab[!is.na(vol_tab$vol_rel), ]
@@ -343,6 +373,20 @@ cluster_meat <- function(X, u, g) {
 vcov_twoway <- function(fit, c1, c2) {
   X <- stats::model.matrix(fit)
   u <- stats::residuals(fit)
+
+  # lm() marks exactly aliased coefficients as NA but retains their columns in
+  # model.matrix(). The reduced flow/holdings samples can make a class or date
+  # dummy redundant even when it varied in the full estimation sample. Remove
+  # only columns already declared non-estimable by lm(); attempting to invert
+  # them would otherwise fail inside chol(crossprod(X)).
+  estimable <- !is.na(stats::coef(fit))
+  if (any(!estimable)) {
+    rlang::warn(paste0(
+      "Omitting aliased coefficient(s) from clustered covariance: ",
+      paste(names(estimable)[!estimable], collapse = ", "), "."
+    ))
+    X <- X[, names(estimable)[estimable], drop = FALSE]
+  }
 
   # lm() SILENTLY DROPS rows with NA in any model variable, so a cluster vector
   # taken from the full estimation frame is longer than X and no longer aligned
@@ -499,7 +543,8 @@ run_specs <- function(dv) {
     dplyr::select(t2, term, est_2 = estimate, se_2 = std_error, t_2 = t),
     by = "term"
   ) %>%
-    dplyr::mutate(dv = dv, .before = 1)
+    dplyr::mutate(dv = dv, n_1 = stats::nobs(m1), n_2 = stats::nobs(m2),
+                  .before = 1)
 }
 
 # -----------------------------------------------------------------------------
@@ -574,6 +619,141 @@ for (d in c("gap", "gap_raw")) {
       "by centering)\n")
   print(as.data.frame(dplyr::select(dplyr::filter(reg_out, dv == d), -dv)), digits = 3)
 }
+
+# -----------------------------------------------------------------------------
+# Specs 5--8 -- DESCRIPTIVE EXTENSIONS. These specifications are deliberately
+# separate from the baseline and do not supersede Specs 1--4.
+#
+# Specs 5--6 add lagged flow and flow volatility. Although dated before the
+# dependent-variable window, these variables can still be functions of past
+# performance under Berk-Green and are not valid instruments for fund skill.
+#
+# Specs 7--8 add revealed-strategy variables: trailing residual volatility,
+# trailing residual-return correlation with the mandate-matched machine, and a
+# lower-bound HHI based on disclosed top holdings. They are possible channels
+# through which skill and constraints affect returns. Conditioning on them can
+# therefore attenuate the very association of interest. Their coefficients and
+# the change in the intercept are reported as decomposition evidence only.
+rhs_flow <- drop_degenerate(c("flow_rate_lag_10", "flow_vol_12_10"), est)
+rhs_mechanism <- drop_degenerate(
+  c("resid_vol_12", "rho_machine_10", "hhi_top15_01"), est
+)
+
+run_extension_spec <- function(dv, extra, spec, time_fe = FALSE) {
+  rhs <- c(rhs_fe, extra, if (time_fe) "period_f")
+  f <- stats::as.formula(paste(dv, "~", paste(rhs, collapse = " + ")))
+  m <- lm_centered(f, est)
+  out <- tidy_clustered(m, est$code, est$period)
+  if (time_fe) out <- dplyr::filter(out, !grepl("^period_f", term))
+  out %>%
+    dplyr::transmute(spec = spec, dv = dv, term, estimate, std_error, t, p,
+                     n = stats::nobs(m), time_fe = time_fe)
+}
+
+extension_reg <- dplyr::bind_rows(
+  purrr::map_dfr(c("gap", "gap_raw"), run_extension_spec,
+                 extra = rhs_flow, spec = "Spec 5", time_fe = FALSE),
+  purrr::map_dfr(c("gap", "gap_raw"), run_extension_spec,
+                 extra = rhs_flow, spec = "Spec 6", time_fe = TRUE),
+  purrr::map_dfr(c("gap", "gap_raw"), run_extension_spec,
+                 extra = rhs_mechanism, spec = "Spec 7", time_fe = FALSE),
+  purrr::map_dfr(c("gap", "gap_raw"), run_extension_spec,
+                 extra = rhs_mechanism, spec = "Spec 8", time_fe = TRUE)
+)
+readr_write(extension_reg, "gap_extension_regressions.csv")
+
+cat("\n=== Specs 5--8: descriptive flow and mechanism extensions,",
+    "two-way clustered ===\n")
+for (sp in unique(extension_reg$spec)) {
+  for (d in c("gap", "gap_raw")) {
+    cat("\n--", sp, "| DV =", d, "--\n")
+    print(as.data.frame(dplyr::select(
+      dplyr::filter(extension_reg, spec == sp, dv == d),
+      -spec, -dv, -time_fe)), digits = 3)
+  }
+}
+
+# -----------------------------------------------------------------------------
+# Recursive-demeaning IV robustness.
+#
+# Pastor, Stambaugh, and Taylor (2015) show that ordinary fund fixed effects can
+# still produce a finite-sample bias when innovations in fund size are positively
+# correlated with contemporaneous unexpected returns. Their estimator forward
+# demeans the outcome and lagged size within fund, then instruments the
+# forward-demeaned size with its recursively backward-demeaned counterpart.
+# Both stages are fitted through the origin.
+#
+# The opening AUM used here is already dated before the 15th-to-15th return
+# window. `log_pl_fundo` is used because the baseline scale specification is in
+# logs and Pastor et al. report the log-size form as a robustness specification.
+# The direct RD model contains only fund size. The second model adds
+# return-window indicators as exogenous controls, which are forward demeaned and
+# instrument themselves. Static fund traits disappear under the within-fund
+# transformation and are deliberately not added back.
+#
+# Unlike the paper's undocumented model-specific threshold rule, no fund is
+# removed to improve the first-stage statistic. The pooled and fund-level first
+# stages are exported so any sensitivity exclusion can be stated ex ante and
+# audited separately. These estimates address the scale coefficient; they do not
+# identify causal effects of flows, fees, risk, or concentration.
+run_gap_rd_iv <- function(dv, time_fe = FALSE) {
+  exogenous <- if (time_fe) "period_f" else character()
+  model_columns <- unique(c("code", "period", dv, "log_pl_fundo", exogenous))
+  rd_data <- est %>%
+    dplyr::filter(dplyr::if_all(dplyr::all_of(model_columns), ~ !is.na(.x)))
+  if (nrow(rd_data) < nrow(est)) {
+    rlang::inform(sprintf(
+      "RD-IV %s: explicitly excluded %d row(s) with incomplete model inputs.",
+      dv, nrow(est) - nrow(rd_data)
+    ))
+  }
+  fit <- recursive_demeaning_iv(
+    data = rd_data,
+    id = "code",
+    time = "period",
+    outcome = dv,
+    endogenous = "log_pl_fundo",
+    exogenous = exogenous,
+    cluster = c("code", "period"),
+    keep_transformed = FALSE
+  )
+  spec <- if (time_fe) "RD with return-window FE" else "RD direct"
+
+  list(
+    fit = fit,
+    coefficient = fit$coefficients %>%
+      dplyr::filter(term == "log_pl_fundo") %>%
+      dplyr::mutate(spec = spec, dv = dv, .before = 1),
+    first_stage = fit$first_stage %>%
+      dplyr::mutate(spec = spec, dv = dv, .before = 1),
+    diagnostics = fit$diagnostics %>%
+      dplyr::mutate(spec = spec, dv = dv, .before = 1),
+    fund_first_stage = fit$fund_first_stage %>%
+      dplyr::mutate(spec = spec, dv = dv, .before = 1)
+  )
+}
+
+rd_runs <- list(
+  gap_direct = run_gap_rd_iv("gap", time_fe = FALSE),
+  gap_time_fe = run_gap_rd_iv("gap", time_fe = TRUE),
+  raw_direct = run_gap_rd_iv("gap_raw", time_fe = FALSE),
+  raw_time_fe = run_gap_rd_iv("gap_raw", time_fe = TRUE)
+)
+
+rd_coefficients <- purrr::map_dfr(rd_runs, "coefficient")
+rd_first_stage <- purrr::map_dfr(rd_runs, "first_stage")
+rd_diagnostics <- purrr::map_dfr(rd_runs, "diagnostics")
+rd_fund_first_stage <- purrr::map_dfr(rd_runs, "fund_first_stage")
+
+readr_write(rd_coefficients, "gap_rd_iv_estimates.csv")
+readr_write(rd_first_stage, "gap_rd_iv_first_stage.csv")
+readr_write(rd_diagnostics, "gap_rd_iv_sample.csv")
+readr_write(rd_fund_first_stage, "gap_rd_iv_fund_first_stage.csv")
+
+cat("\n=== Recursive-demeaning IV robustness: log fund AUM ===\n")
+print(as.data.frame(rd_coefficients), digits = 3)
+cat("\n=== RD-IV first-stage diagnostics ===\n")
+print(as.data.frame(rd_first_stage), digits = 3)
 
 # The unconditional gap, which is the number the abstract quotes. Reported per
 # benchmark arm as well as pooled, because pooling averages differently-mandated
@@ -755,19 +935,27 @@ build_ladder <- function() {
       ) %>%
       dplyr::select(period, mandate, ra_ml)
 
-    tibble::as_tibble(fund_ra) %>%
+    ladder_rows <- tibble::as_tibble(fund_ra) %>%
       dplyr::mutate(period = ml_index) %>%
       tidyr::pivot_longer(-period, names_to = "code", values_to = "ra_fund") %>%
       dplyr::inner_join(keep, by = c("code", "period")) %>%
       dplyr::left_join(ml_long, by = c("period", "mandate")) %>%
       dplyr::filter(!is.na(ra_fund), !is.na(ra_ml)) %>%
-      dplyr::summarise(
-        scheme    = s,
-        n         = dplyr::n(),
-        mean_gap  = mean(ra_ml - ra_fund),
-        se_gap    = stats::sd(ra_ml - ra_fund) / sqrt(dplyr::n_distinct(period)),
-        pct_ahead = mean(ra_ml > ra_fund)
-      )
+      dplyr::mutate(gap = ra_ml - ra_fund)
+
+    fit <- stats::lm(gap ~ 1, data = ladder_rows)
+    inf <- tidy_clustered(fit, ladder_rows$code, ladder_rows$period)
+    tibble::tibble(
+      scheme    = s,
+      n         = nrow(ladder_rows),
+      funds     = dplyr::n_distinct(ladder_rows$code),
+      periods   = dplyr::n_distinct(ladder_rows$period),
+      mean_gap  = inf$estimate[[1L]],
+      se_gap    = inf$std_error[[1L]],
+      pct_ahead = mean(ladder_rows$gap > 0),
+      t         = inf$t[[1L]],
+      p         = inf$p[[1L]]
+    )
   })
 }
 
@@ -775,19 +963,25 @@ ladder <- tryCatch(build_ladder(), error = function(e) {
   rlang::warn(paste("H7 ladder failed:", conditionMessage(e))); NULL
 })
 if (!is.null(ladder)) {
-  ladder <- dplyr::mutate(ladder, t = mean_gap / se_gap)
   cat("\n=== H7: gap by ML construction scheme ===\n")
   print(as.data.frame(ladder), digits = 3)
   readr_write(ladder, "gap_by_scheme.csv")
 
-  p_ladder <- ggplot(ladder, aes(stats::reorder(scheme, mean_gap), mean_gap)) +
+  scheme_labels <- c(rp = "RP", rp_box = "RP_BOX", hrp = "HRP", cs = "CS",
+                     sw = "SW", ew = "EW", mvo = "MVO",
+                     mvo_box = "MVO_BOX", average = "Average")
+  ladder <- dplyr::mutate(
+    ladder,
+    scheme_label = unname(scheme_labels[scheme])
+  )
+  p_ladder <- ggplot(ladder, aes(stats::reorder(scheme_label, mean_gap), mean_gap)) +
     geom_hline(yintercept = 0, colour = "grey40", linewidth = 0.3) +
     geom_pointrange(aes(ymin = mean_gap - 1.96 * se_gap,
                         ymax = mean_gap + 1.96 * se_gap),
                     colour = "#1b6ca8") +
     coord_flip() +
-    labs(title = "Does the human deficit depend on which systematic scheme is the benchmark?",
-         subtitle = "Mean gap with 95% intervals. Flat across schemes = the story is systematisation, not optimiser sophistication",
+    labs(title = "Adjusted gap across portfolio-construction schemes",
+         subtitle = "Means and 95% intervals with fund and period clustering",
          x = NULL, y = "Mean gap (pp per month)")
   ggsave(file.path(FIG_DIR, "gap_by_scheme.png"), p_ladder,
          width = 9, height = 4, dpi = 300, bg = "white")
@@ -902,15 +1096,60 @@ gap_ts <- est %>%
   dplyr::group_by(period) %>%
   dplyr::summarise(mean_gap = mean(gap), med_gap = stats::median(gap),
                    n = dplyr::n(), .groups = "drop")
+readr_write(gap_ts, "gap_over_time.csv")
 
 p_gap <- ggplot(gap_ts, aes(period)) +
   geom_hline(yintercept = 0, colour = "grey40", linewidth = 0.3) +
   geom_col(aes(y = mean_gap, fill = mean_gap > 0), width = 22, show.legend = FALSE) +
   scale_fill_manual(values = c(`TRUE` = "#1b6ca8", `FALSE` = "#c0392b")) +
   labs(title = "Human-machine gap over time",
-       subtitle = "Cross-sectional mean of ra_m(i) - ra_fund. Positive = the systematic benchmark is ahead",
+       subtitle = "Monthly mean of the mandate-matched, long-only FF6-adjusted difference",
        x = NULL, y = "Percent per month")
 ggsave(file.path(FIG_DIR, "gap_over_time.png"), p_gap, width = 9, height = 4, dpi = 300, bg = "white")
+
+if (exists("p_ladder", inherits = FALSE)) {
+  gap_summary_plot <- cowplot::plot_grid(
+    p_gap, p_ladder,
+    labels = c("(a)", "(b)"),
+    label_fontface = "bold", label_size = 11,
+    ncol = 1, align = "v", axis = "lr",
+    rel_heights = c(1, 0.92)
+  )
+  gap_summary_file <- file.path(FIG_DIR, "gap_summary.png")
+  ggsave(gap_summary_file, gap_summary_plot,
+         width = 9.5, height = 8.2, dpi = 320, bg = "white")
+
+  latex_gap_figure_dir <- here::here("latex_paper", "figures")
+  dir.create(latex_gap_figure_dir, showWarnings = FALSE, recursive = TRUE)
+  if (!file.copy(gap_summary_file,
+                 file.path(latex_gap_figure_dir, basename(gap_summary_file)),
+                 overwrite = TRUE)) {
+    rlang::abort("Could not copy the combined gap figure to latex_paper/figures.")
+  }
+
+  gap_summary_figure_tex <- c(
+    "\\begin{figure}[p]",
+    "\\centering",
+    "\\captionsetup{justification=raggedright,labelsep=none,singlelinecheck=false,labelformat=boldlabel}",
+    paste0(
+      "\\caption[Human-machine performance gap]",
+      "{\\footnotesize \\textbf{: Human-machine performance gap.} ",
+      "Panel (a) reports, for each return window, the cross-sectional mean of ",
+      "the machine-minus-fund realised return residual after long-only FF6-style ",
+      "adjustment. Each fund is compared with the machine portfolio formed under ",
+      "its declared mandate; positive values indicate that the matched machine is ",
+      "ahead. Panel (b) recomputes the sample mean separately for each machine ",
+      "portfolio-construction scheme. Average denotes the equal-weighted mean ",
+      "across the eight schemes. Intervals are 95\\% confidence intervals based ",
+      "on standard errors clustered by fund and return window.}"
+    ),
+    "\\includegraphics[width=\\linewidth,height=0.82\\textheight,keepaspectratio]{figures/gap_summary.png}",
+    "\\label{fig:gap_summary}",
+    "\\end{figure}"
+  )
+  writeLines(gap_summary_figure_tex,
+             file.path(FIG_DIR, "gap_summary_figure.tex"))
+}
 
 gap_ts_mandate <- est %>%
   dplyr::group_by(period, mandate) %>%
@@ -1015,5 +1254,219 @@ desc <- est %>%
 readr_write(desc, "estimation_sample_descriptives.csv")
 cat("\n=== Estimation sample descriptives ===\n")
 print(as.data.frame(desc), digits = 3)
+
+
+# =============================================================================
+# 7. LaTeX tables for the gap subsection
+# =============================================================================
+# Tables report t-statistics rather than significance stars. The distinction is
+# intentional: these are observational associations with a short time dimension
+# and several endogenous or mediating covariates.
+tex_cell <- function(estimate, t) {
+  if (length(estimate) != 1L || !is.finite(estimate) || !is.finite(t)) return("--")
+  sprintf("\\shortstack{%.3f\\\\(%.2f)}", estimate, t)
+}
+
+find_reg_cell <- function(tbl, spec, dv, term) {
+  z <- dplyr::filter(tbl, .data$spec == .env$spec,
+                     .data$dv == .env$dv, .data$term == .env$term)
+  if (nrow(z) != 1L) return("--")
+  tex_cell(z$estimate[[1L]], z$t[[1L]])
+}
+
+baseline_long <- dplyr::bind_rows(
+  reg_out %>%
+    dplyr::transmute(spec = "Spec 1", dv, term, estimate = est_1,
+                     std_error = se_1, t = t_1, n = n_1, time_fe = FALSE),
+  reg_out %>%
+    dplyr::transmute(spec = "Spec 2", dv, term, estimate = est_2,
+                     std_error = se_2, t = t_2, n = n_2, time_fe = TRUE)
+)
+all_reg <- dplyr::bind_rows(baseline_long, regime_reg, extension_reg)
+
+make_reg_rows <- function(tbl, columns, terms, labels) {
+  vapply(seq_along(terms), function(i) {
+    cells <- vapply(columns, function(col) {
+      find_reg_cell(tbl, col[[1L]], col[[2L]], terms[[i]])
+    }, character(1))
+    paste(c(labels[[i]], cells), collapse = " & ") |> paste0(" \\\\")
+  }, character(1))
+}
+
+make_obs_row <- function(tbl, columns) {
+  vals <- vapply(columns, function(col) {
+    spec_i <- col[[1L]]
+    dv_i <- col[[2L]]
+    z <- dplyr::filter(tbl, .data$spec == .env$spec_i,
+                       .data$dv == .env$dv_i)
+    if (nrow(z) == 0L || !"n" %in% names(z)) return("--")
+    format(z$n[[1L]], big.mark = ",", scientific = FALSE)
+  }, character(1))
+  paste(c("Observations", vals), collapse = " & ") |> paste0(" \\\\")
+}
+
+# Unconditional means by benchmark arm.
+arm_order <- c("pooled", "ibov", "smll", "idiv")
+arm_labels <- c(pooled = "Pooled", ibov = "Broad market",
+                smll = "Small cap", idiv = "Dividend")
+uncond_rows <- vapply(arm_order, function(a) {
+  adj <- dplyr::filter(uncond, arm == a, dv == "gap")
+  raw <- dplyr::filter(uncond, arm == a, dv == "gap_raw")
+  d <- if (a == "pooled") est else dplyr::filter(est, mandate == a)
+  wedge <- mean(d$gap_raw - d$gap)
+  paste0(
+    arm_labels[[a]], " & ", format(raw$n[[1L]], big.mark = ","), " & ",
+    raw$funds[[1L]], " & ", tex_cell(raw$mean_gap[[1L]], raw$t[[1L]]), " & ",
+    tex_cell(adj$mean_gap[[1L]], adj$t[[1L]]), " & ", sprintf("%.3f", wedge),
+    " \\\\"
+  )
+}, character(1))
+
+gap_unconditional_tex <- c(
+  "\\begin{table}[p]",
+  "\\centering",
+  "\\captionsetup{justification=raggedright,labelsep=none,singlelinecheck=false,labelformat=boldlabel}",
+  paste0(
+    "\\caption[Unconditional human-machine gap]",
+    "{\\footnotesize \\textbf{: Unconditional human-machine gap.} ",
+    "The gap is the mandate-matched machine return minus the fund return, in ",
+    "percentage points per month. The adjusted gap uses realised return ",
+    "residuals from the long-only FF6-style basis with betas estimated over the ",
+    "preceding 36 months. The factor-exposure wedge is raw minus adjusted. ",
+    "Parentheses contain t-statistics based on fund and return-window clustering. ",
+    "The small-cap and dividend arms contain few funds and should be read as ",
+    "within-mandate evidence rather than separate population estimates.}"
+  ),
+  "\\footnotesize",
+  "\\begin{tabular}{lrrrrr}",
+  "\\hline",
+  "Benchmark arm & Rows & Funds & Raw gap & Adjusted gap & Factor wedge \\\\",
+  "\\hline",
+  uncond_rows,
+  "\\hline",
+  "\\end{tabular}",
+  "\\label{gapmeans}",
+  "\\end{table}"
+)
+writeLines(gap_unconditional_tex, file.path(TAB_DIR, "gap_unconditional.tex"))
+
+# Baseline and market-state specifications.
+baseline_cols <- list(c("Spec 1", "gap"), c("Spec 2", "gap"),
+                      c("Spec 1", "gap_raw"), c("Spec 2", "gap_raw"))
+baseline_terms <- c("(Intercept)", "log_pl_fundo", "log_pl_gestora",
+                    "redemption_days", "expense_ratio", "log_age", "bank",
+                    "retail", "efpc")
+baseline_labels <- c("Mean-characteristic intercept", "Log fund AUM",
+                     "Log manager AUM", "Redemption notice (days)",
+                     "Management fee (pp p.a.)", "Log fund age",
+                     "Bank affiliated", "General-investor audience", "EFPC")
+
+regime_cols <- list(c("Spec 3", "gap"), c("Spec 4", "gap"),
+                    c("Spec 3", "gap_raw"), c("Spec 4", "gap_raw"))
+regime_terms <- c("mkt_ret", "bear", "crisis_fcovid", "crisis_fratehike",
+                  "vol_regime_fvol_low", "vol_regime_fvol_high")
+regime_labels <- c("Mandate-index return", "Down-market indicator",
+                   "COVID window", "Rate-hike window",
+                   "Low-volatility tercile", "High-volatility tercile")
+
+gap_regressions_tex <- c(
+  "\\begin{table}[p]",
+  "\\centering",
+  "\\captionsetup{justification=raggedright,labelsep=none,singlelinecheck=false,labelformat=boldlabel}",
+  paste0(
+    "\\caption[Baseline and market-state gap regressions]",
+    "{\\footnotesize \\textbf{: Baseline and market-state gap regressions.} ",
+    "The dependent variable is the mandate-matched machine-minus-fund gap in ",
+    "percentage points per month. Adjusted denotes the long-only FF6-style ",
+    "residual gap. All specifications include mandate and index-class controls; ",
+    "Specs. 2 additionally include return-window fixed effects. Specs. 3 and 4 ",
+    "omit those fixed effects because market-state main effects vary at the ",
+    "mandate-window level; Spec. 4 adds volatility regimes to Spec. 3. Regressors ",
+    "are centered, so the intercept describes a fund with sample-mean ",
+    "characteristics. Parentheses contain t-statistics based on fund and ",
+    "return-window clustering. Coefficients are descriptive associations.}"
+  ),
+  "\\scriptsize",
+  "\\begin{tabular}{lrrrr}",
+  "\\hline",
+  " & \\multicolumn{2}{c}{Adjusted gap} & \\multicolumn{2}{c}{Raw gap} \\\\",
+  " & Spec. 1 & Spec. 2 & Spec. 1 & Spec. 2 \\\\",
+  "\\hline",
+  "\\multicolumn{5}{l}{\\textit{Panel A: Baseline fund characteristics}} \\\\",
+  make_reg_rows(all_reg, baseline_cols, baseline_terms, baseline_labels),
+  "Return-window fixed effects & No & Yes & No & Yes \\\\",
+  make_obs_row(all_reg, baseline_cols),
+  "\\hline",
+  "\\multicolumn{5}{l}{\\textit{Panel B: Market states}} \\\\",
+  " & Spec. 3 & Spec. 4 & Spec. 3 & Spec. 4 \\\\",
+  make_reg_rows(all_reg, regime_cols, regime_terms, regime_labels),
+  "Return-window fixed effects & No & No & No & No \\\\",
+  make_obs_row(all_reg, regime_cols),
+  "\\hline",
+  "\\end{tabular}",
+  "\\label{gapregs}",
+  "\\end{table}"
+)
+writeLines(gap_regressions_tex, file.path(TAB_DIR, "gap_regressions.tex"))
+
+# Endogenous-flow and revealed-strategy extensions.
+flow_cols <- list(c("Spec 5", "gap"), c("Spec 6", "gap"),
+                  c("Spec 5", "gap_raw"), c("Spec 6", "gap_raw"))
+flow_terms <- c("(Intercept)", "flow_rate_lag_10", "flow_vol_12_10",
+                "log_pl_fundo", "log_pl_gestora", "expense_ratio", "retail")
+flow_labels <- c("Mean-characteristic intercept", "Lagged net flow (10 pp)",
+                 "Flow volatility (10 pp)", "Log fund AUM",
+                 "Log manager AUM", "Management fee (pp p.a.)",
+                 "General-investor audience")
+
+mechanism_cols <- list(c("Spec 7", "gap"), c("Spec 8", "gap"),
+                       c("Spec 7", "gap_raw"), c("Spec 8", "gap_raw"))
+mechanism_terms <- c("(Intercept)", "resid_vol_12", "rho_machine_10",
+                     "hhi_top15_01", "expense_ratio", "retail")
+mechanism_labels <- c("Mean-characteristic intercept",
+                      "Trailing residual volatility (1 pp)",
+                      "Residual correlation with machine (0.10)",
+                      "Top-holdings HHI (0.01)",
+                      "Management fee (pp p.a.)", "General-investor audience")
+
+gap_extensions_tex <- c(
+  "\\begin{table}[p]",
+  "\\centering",
+  "\\captionsetup{justification=raggedright,labelsep=none,singlelinecheck=false,labelformat=boldlabel}",
+  paste0(
+    "\\caption[Descriptive flow and mechanism extensions]",
+    "{\\footnotesize \\textbf{: Descriptive flow and mechanism extensions.} ",
+    "Specs. 5--6 add lagged net flow and its trailing volatility to the complete ",
+    "baseline control set. Specs. 7--8 instead add trailing fund residual ",
+    "volatility, trailing residual-return correlation with the mandate-matched ",
+    "machine, and the lower-bound HHI of disclosed top holdings. Even though the ",
+    "added variables are dated before the dependent-variable window, flows can ",
+    "respond to past performance and the revealed-strategy variables can mediate ",
+    "the relation between skill and returns. These coefficients are therefore ",
+    "descriptive decompositions, not causal effects. Parentheses contain ",
+    "two-way-clustered t-statistics.}"
+  ),
+  "\\scriptsize",
+  "\\begin{tabular}{lrrrr}",
+  "\\hline",
+  " & \\multicolumn{2}{c}{Adjusted gap} & \\multicolumn{2}{c}{Raw gap} \\\\",
+  "\\multicolumn{5}{l}{\\textit{Panel A: Endogenous flow and scale}} \\\\",
+  " & Spec. 5 & Spec. 6 & Spec. 5 & Spec. 6 \\\\",
+  "\\hline",
+  make_reg_rows(all_reg, flow_cols, flow_terms, flow_labels),
+  "Return-window fixed effects & No & Yes & No & Yes \\\\",
+  make_obs_row(all_reg, flow_cols),
+  "\\hline",
+  "\\multicolumn{5}{l}{\\textit{Panel B: Revealed strategy and concentration}} \\\\",
+  " & Spec. 7 & Spec. 8 & Spec. 7 & Spec. 8 \\\\",
+  make_reg_rows(all_reg, mechanism_cols, mechanism_terms, mechanism_labels),
+  "Return-window fixed effects & No & Yes & No & Yes \\\\",
+  make_obs_row(all_reg, mechanism_cols),
+  "\\hline",
+  "\\end{tabular}",
+  "\\label{gapextensions}",
+  "\\end{table}"
+)
+writeLines(gap_extensions_tex, file.path(TAB_DIR, "gap_extensions.tex"))
 
 cat("\nFigures written to figures/, tables to tables/.\n")

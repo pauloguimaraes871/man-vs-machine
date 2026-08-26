@@ -1362,16 +1362,16 @@ portfolio_characteristics_figures_tex <- latex_figure(
 writeLines(portfolio_characteristics_figures_tex,
            here::here("figures", "portfolio_characteristics_figure.tex"))
 
-# ---- Long-only factor attribution (returns-based style regression) ----------
+# ---- Long-only FF6-style attribution (returns-based style regression) -------
 # We have no fund holdings, so instead of characteristic averages we regress the
 # portfolio returns on long-only factor-mimicking portfolios. To keep the market
 # loading interpretable and defeat the collinearity of long-only equity
-# portfolios (all ~ market + tilt), each style factor is used market-neutralized
+# portfolios (all ~ market + tilt), each style factor is used benchmark-relative
 # (style return minus the benchmark), i.e. as an active/tilt return; MKT enters
 # as the benchmark excess over CDI. This is a returns-based style attribution,
 # not a Fama-French risk-premium test: loadings are style tilts and alpha is the
 # active return unexplained by the market + style basis. `screen` must be
-# loaded in the session (its $signal_port_cohorts holds the cap-scaled long-only
+# loaded in the session (its $signal_port_cohorts holds the capacity-scaled long-only
 # signal portfolios).
 
 # Daily CDI is compounded on the same 15th-to-15th endpoints as every return
@@ -1419,7 +1419,7 @@ factor_mat <- tibble::tibble(
 ff_predictors <- c("mkt_e", "hml_n", "mom_n", "rmw_n", "smb_n", "cma_n")
 ff_disp       <- c("alpha", "MKT", "HML", "MOM", "RMW", "SMB", "CMA")
 
-# Regress one return series (percent) on the market-neutralized factor basis.
+# Regress one return series (percent) on the benchmark-relative factor basis.
 regress_flat <- function(ret, ret_ym) {
   d <- data.frame(ret = as.numeric(ret), ym = ret_ym, stringsAsFactors = FALSE) %>%
     dplyr::inner_join(factor_mat, by = "ym")
@@ -1507,20 +1507,24 @@ factor_table_tex <- c(
   "}",
   "\\renewcommand{\\arraystretch}{1.2}",
   paste0(
-    "\\caption[Long-only factor attribution of portfolio returns]",
-    "{\\footnotesize \\textbf{: Long-only factor ",
+    "\\caption[Long-only FF6-style attribution of portfolio returns]",
+    "{\\footnotesize \\textbf{: Long-only FF6-style ",
     "attribution of portfolio returns.} Each portfolio's monthly excess return over ",
-    "the CDI is regressed on a market factor and five market-neutralized style ",
-    "factors built from long-only cap-scaled signal portfolios: MKT is the benchmark ",
+    "the CDI is regressed on a market factor and five benchmark-relative style ",
+    "factors built from long-only capacity-scaled signal portfolios: MKT is the benchmark ",
     "(IBOV) excess return over CDI, and HML (be\\_me), MOM (prc\\_ret\\_12m\\_1m), RMW ",
-    "(gp\\_at\\_12m), SMB (log\\_mkt\\_cap) and CMA (assets\\_gr1y\\_tr) are each the ",
-    "long-only signal portfolio minus the benchmark (an active/tilt return). This is ",
-    "a returns-based style attribution, not a risk-premium test: loadings are style ",
+    "(gp\\_at\\_12m), SMB (log\\_mkt\\_cap) and CMA (assets\\_gr1y) are each the ",
+    "long-only signal portfolio minus the benchmark (an active/tilt return). Unlike ",
+    "the canonical FF6 long-minus-short factors, each style leg is a long-only ",
+    "portfolio; subtracting the IBOV defines the attribution return rather than a ",
+    "funded short position. It is a returns-based style attribution, ",
+    "not a risk-premium test: loadings are benchmark-relative style ",
     "tilts and $\\alpha$ (percent per month) is the active return unexplained by the ",
     "basis. Fund, IBOV and CDI daily returns are geometrically compounded from the ",
     "previous calendar 15th through the current calendar 15th, matching the ML and ",
     "factor-portfolio timing. MKT is therefore the contemporaneous market loading. ",
-    "Estimates are shown with t-statistics in parentheses; $R^2$ is the regression ",
+    "Estimates are shown with ordinary least-squares t-statistics in parentheses; ",
+    "$R^2$ is the regression ",
     "fit. MED and ",
     "MED\\_Q75 regress each fund individually and report the median loading ",
     "across (all / top-quartile) funds.}"
@@ -1877,23 +1881,56 @@ pred_mat  <- as.matrix(preds_df[, pred_cols, drop = FALSE])
 colnames(pred_mat) <- fi_model_label(pred_cols)
 pred_mat  <- pred_mat[, intersect(fi_model_order, colnames(pred_mat)), drop = FALSE]
 
-# Average of the per-date CROSS-SECTIONAL correlation matrices: this asks
-# whether the models rank the same stocks alike, without the common time-series
-# variation in prediction levels that a pooled correlation would absorb.
-per_date_cor <- lapply(split(seq_len(nrow(pred_mat)), preds_df$dates), function(i) {
-  if (length(i) < 3L) return(NULL)
-  suppressWarnings(stats::cor(pred_mat[i, , drop = FALSE], use = "pairwise.complete.obs"))
-})
-per_date_cor <- Filter(Negate(is.null), per_date_cor)
-stopifnot(length(per_date_cor) > 0L)
-pred_cor <- apply(simplify2array(per_date_cor), 1:2, mean, na.rm = TRUE)
+# Average the per-date CROSS-SECTIONAL correlation matrices. Pearson measures
+# agreement in prediction levels, whereas Spearman measures agreement in the
+# stock rankings that determine upper-tercile eligibility.
+mean_cross_sectional_cor <- function(predictions, dates, method = c("pearson", "spearman")) {
+  method <- match.arg(method)
+  if (!is.matrix(predictions) || nrow(predictions) != length(dates)) {
+    rlang::abort("Predictions must be a matrix with one date per row.")
+  }
+
+  per_date_cor <- lapply(split(seq_len(nrow(predictions)), dates), function(i) {
+    if (length(i) < 3L) return(NULL)
+    suppressWarnings(stats::cor(
+      predictions[i, , drop = FALSE],
+      use = "pairwise.complete.obs",
+      method = method
+    ))
+  })
+  per_date_cor <- Filter(Negate(is.null), per_date_cor)
+  if (length(per_date_cor) == 0L) {
+    rlang::abort("No date contains enough observations to estimate correlations.")
+  }
+
+  correlation <- apply(simplify2array(per_date_cor), 1:2, mean, na.rm = TRUE)
+  if (any(!is.finite(correlation))) {
+    rlang::abort(paste0("The mean ", method, " correlation matrix is non-finite."))
+  }
+  correlation
+}
+
+pred_cor_matrices <- list(
+  Pearson = mean_cross_sectional_cor(pred_mat, preds_df$dates, "pearson"),
+  Spearman = mean_cross_sectional_cor(pred_mat, preds_df$dates, "spearman")
+)
+pred_cor_long <- purrr::imap_dfr(
+  pred_cor_matrices,
+  ~cor_long(.x, paste0(ifelse(.y == "Pearson", "A. ", "B. "), .y, " correlation"))
+)
+pred_cor_long$panel <- factor(
+  pred_cor_long$panel,
+  levels = c("A. Pearson correlation", "B. Spearman correlation")
+)
 
 pred_cor_plot <- correlogram_plot(
-  cor_long(pred_cor, "Mean cross-sectional correlation of predictions"),
-  title = "Agreement across base-learner predictions"
+  pred_cor_long,
+  title = "Agreement across base-learner predictions",
+  ncol = 2L,
+  text_size = 3.7
 )
 ggplot2::ggsave(here::here("figures", "correlogram_predictions.png"),
-                pred_cor_plot, width = 10, height = 8.5, dpi = 300, bg = "white")
+                pred_cor_plot, width = 15.5, height = 7.5, dpi = 300, bg = "white")
 
 # --- (ii) Portfolio return agreement, ML Ensemble vs human managers ---
 perf_mat <- cbind(zoo::coredata(ml_ports_net_m_xts), zoo::coredata(funds_bench_m_xts))
@@ -1906,6 +1943,7 @@ bench_vec <- as.numeric(zoo::coredata(ml_bench_m_xts))
 # Each cell averages the focal series' correlations with the corresponding
 # individual-fund cohort. Diagonal cells average distinct fund pairs.
 perf_cor_with_fund_averages <- function(series_mat, funds_mat, q75_funds_mat) {
+  
   pairwise_cor <- function(x) {
     cm <- stats::cor(x, use = "pairwise.complete.obs")
     mean(cm[upper.tri(cm)], na.rm = TRUE)
@@ -1976,16 +2014,18 @@ correlogram_figures_tex <- c(
     "correlogram_predictions.png",
     "Agreement across base-learner predictions.",
     paste(
-      "Pairwise correlation of the out-of-sample return predictions of the seven",
-      "base learners (OLS, GLMNET, RF, XGB, NN1--NN3). Correlations are computed",
-      "cross-sectionally within each month and then averaged over months, so they",
-      "measure whether the models rank the same stocks alike rather than sharing a",
-      "common time-series level. Mean correlation across all 21 model pairs is",
-      "0.81. The RF--XGB correlation is 0.82, while mean within-family",
-      "correlation is 0.93 among NN1--NN3 and 0.81 between OLS and GLMNET. The",
-      "lowest pair is OLS--XGB at 0.66. High within-family correlations indicate",
-      "that architecture variants often provide less forecast diversification",
-      "than their different labels suggest."
+      "Pairwise association of the out-of-sample return predictions of the seven",
+      "base learners (OLS, GLMNET, RF, XGB, NN1--NN3). Panel A reports Pearson",
+      "correlations of prediction levels and Panel B reports Spearman correlations",
+      "of prediction ranks. Both measures are computed cross-sectionally within",
+      "each month and then averaged over months, avoiding common time-series",
+      "variation in prediction levels. Mean correlation across the 21 model pairs",
+      "is 0.81 under Pearson and 0.78 under Spearman. Mean within-network",
+      "correlation is 0.93 and 0.92, respectively; RF--XGB correlation is 0.82 and",
+      "0.76. Spearman correlation is directly relevant to the upper-tercile",
+      "portfolio rule because eligibility depends on ranks. The similar ordering",
+      "across panels shows that the conclusion of limited within-family forecast",
+      "diversification is not specific to linear correlation."
     ),
     "fig:corr_pred"
   ),
