@@ -380,10 +380,13 @@ effect; one appearing only in xgb/nn is a training-objective effect.
    selection (factoRverse warns at runtime). Selection is the channel under
    test, but the arm is not a pure pinball run and should not be described as
    one.
-2. **OLS is a free control on the `rmse` and `mpe` arms only.** It is untuned, so
-   it is bit-identical between those two — if its portfolio moves, that is a
-   plumbing bug. On `mphe` its objective changes with everything else, so it is
-   not a control there.
+2. **OLS is a free control across all three arms, including `mphe`.** It is
+   untuned, and class validity forbids ols configs from carrying any
+   `custom_objective` other than the `"squared_error"` default at all —
+   confirmed by `validObject()` rejecting an attempted `ols`/`pseudo_huber_error`
+   assignment outright when this was first run (see the run log below). So OLS
+   is bit-identical across `rmse`, `mpe` and `mphe`; if its portfolio moves at
+   all, that is a plumbing bug.
 
 **The underlying knobs:**
 
@@ -435,6 +438,29 @@ would skip every model and hand back rmse-tuned learners wearing an mpe label.
 The run now aborts with an explicit message rather than doing that silently, but
 the checkpoint still has to be moved. The baseline does not need it: `sb_grid.qs`
 already exists, so the checkpoint only matters for resuming an interrupted run.
+This applies going into **every** arm switch, not just the first: after the
+`mpe` run finished, its checkpoint was still sitting at the same path and had to
+be moved aside again before `mphe` could start — the guard caught it and
+aborted rather than silently reusing mpe-tuned models.
+
+**Two bugs the first live runs surfaced, both now fixed in `run_paper_machine.R`:**
+
+- The tuning-metric block originally applied to *every* config
+  `create_sb_configs()` builds, not just `SB_CONFIGS`. The pipeline's full
+  base-learner pool also includes heuristic configs (`sw_lt_perf`, `ew`, …)
+  carrying a heuristic `custom_objective` like `"max_lt_perf_agg_z_score"`;
+  overwriting that with `EVAL_OBJECTIVE` failed class validity. Fixed by
+  gating the whole block on `nm %in% SB_CONFIGS`.
+- Even within `SB_CONFIGS`, assigning `custom_objective = "pseudo_huber_error"`
+  to `ols` (on the `mphe` arm) failed class validity: `"Custom objectives are
+  only allowed for 'sw', 'rp', 'hrp', 'mvo', 'mmaf', 'xgb' or 'nn'
+  algorithms."` This is stricter than assumed — it isn't just that
+  `translate_metrics()` returns `NULL` for ols/glmnet/rf and the assignment is
+  inert; the config object cannot hold a non-default value there at all. Fixed
+  by gating the `custom_objective` assignment on `cfg@sb_algorithm %in%
+  c("xgb", "nn")`. The net effect is unchanged — glmnet/rf/ols still move
+  through selection only on `mphe` — but by never touching the slot, not by
+  the translation being a no-op.
 
 **What to compare.** Realized net Sharpe/IR of the resulting portfolios, not the
 training metric — that is the whole point of §4.2. OLS is the control and must
