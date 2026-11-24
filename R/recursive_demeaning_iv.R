@@ -1,6 +1,7 @@
 # Recursive-demeaning IV estimator following Pastor, Stambaugh, and Taylor
-# (2015), equations (5)--(10). The implementation is deliberately limited to
-# one endogenous regressor, which is the paper's core fund-size specification.
+# (2015), equations (5)--(10). Multiple endogenous regressors are supported by
+# projecting every forward-demeaned endogenous variable on the full instrument
+# set of backward-demeaned endogenous variables and forward-demeaned controls.
 
 rd_iv_abort <- function(message) {
   rlang::abort(message, class = "rd_iv_error")
@@ -117,9 +118,9 @@ rd_iv_fund_first_stage <- function(transformed, id_name, x_fd_name, z_bd_name) {
 #' demeaned and instrument themselves. Both stages are fitted through the origin.
 #'
 #' @param data A data frame containing the panel.
-#' @param id,time,outcome,endogenous Scalar column names. `time` must order
-#'   observations economically within `id`; `endogenous` is restricted to one
-#'   variable.
+#' @param id,time,outcome Scalar column names. `time` must order observations
+#'   economically within `id`.
+#' @param endogenous One or more numeric column names to treat as endogenous.
 #' @param exogenous Optional character vector of exogenous control names. Factors
 #'   are expanded using treatment contrasts before recursive demeaning.
 #' @param cluster One or two column names used for clustered inference.
@@ -133,7 +134,7 @@ recursive_demeaning_iv <- function(data, id, time, outcome, endogenous,
                                    cluster = c(id, time),
                                    keep_transformed = TRUE) {
   if (!is.data.frame(data)) rd_iv_abort("`data` must be a data frame.")
-  scalar_names <- list(id = id, time = time, outcome = outcome, endogenous = endogenous)
+  scalar_names <- list(id = id, time = time, outcome = outcome)
   invalid_scalar <- vapply(
     scalar_names,
     function(x) !is.character(x) || length(x) != 1L || is.na(x) || !nzchar(x),
@@ -146,6 +147,13 @@ recursive_demeaning_iv <- function(data, id, time, outcome, endogenous,
   if (!is.character(exogenous) || anyNA(exogenous) || any(!nzchar(exogenous))) {
     rd_iv_abort("`exogenous` must be a character vector of column names.")
   }
+  if (!is.character(endogenous) || !length(endogenous) || anyNA(endogenous) ||
+      any(!nzchar(endogenous)) || anyDuplicated(endogenous)) {
+    rd_iv_abort("`endogenous` must contain one or more unique column names.")
+  }
+  if (outcome %in% c(endogenous, exogenous) || length(intersect(endogenous, exogenous))) {
+    rd_iv_abort("Outcome, endogenous, and exogenous columns must not overlap.")
+  }
   if (!is.character(cluster) || !length(cluster) || length(cluster) > 2L ||
       anyNA(cluster) || any(!nzchar(cluster))) {
     rd_iv_abort("`cluster` must contain one or two column names.")
@@ -157,8 +165,9 @@ recursive_demeaning_iv <- function(data, id, time, outcome, endogenous,
     rd_iv_abort(paste0("Missing required column(s): ",
                        paste(missing_columns, collapse = ", "), "."))
   }
-  if (!is.numeric(data[[outcome]]) || !is.numeric(data[[endogenous]])) {
-    rd_iv_abort("`outcome` and `endogenous` must identify numeric columns.")
+  if (!is.numeric(data[[outcome]]) ||
+      any(!vapply(data[endogenous], is.numeric, logical(1)))) {
+    rd_iv_abort("`outcome` and all `endogenous` columns must be numeric.")
   }
   if (anyNA(data[required])) {
     rd_iv_abort("Required model, key, and cluster columns must not contain missing values.")
@@ -205,8 +214,7 @@ recursive_demeaning_iv <- function(data, id, time, outcome, endogenous,
   transformed_parts <- lapply(usable_rows, function(rows) {
     y <- matrix(ordered[[outcome]][rows], ncol = 1L,
                 dimnames = list(NULL, paste0(outcome, "__fd")))
-    x_endogenous <- matrix(ordered[[endogenous]][rows], ncol = 1L,
-                           dimnames = list(NULL, endogenous))
+    x_endogenous <- as.matrix(ordered[rows, endogenous, drop = FALSE])
     x_all <- cbind(x_endogenous, exogenous_matrix[rows, , drop = FALSE])
     x_forward <- rd_iv_forward_demean(x_all)
     x_backward <- rd_iv_backward_demean(x_endogenous)
@@ -215,10 +223,14 @@ recursive_demeaning_iv <- function(data, id, time, outcome, endogenous,
 
     out <- ordered[rows[keep], unique(c(id, time, cluster)), drop = FALSE]
     out[[paste0(outcome, "__fd")]] <- y_forward[keep, 1L]
-    out[[paste0(endogenous, "__fd")]] <- x_forward[keep, 1L]
-    out[[paste0(endogenous, "__bd")]] <- x_backward[keep, 1L]
+    for (j in seq_along(endogenous)) {
+      out[[paste0(endogenous[[j]], "__fd")]] <- x_forward[keep, j]
+      out[[paste0(endogenous[[j]], "__bd")]] <- x_backward[keep, j]
+    }
     if (ncol(exogenous_matrix)) {
-      exogenous_forward <- x_forward[keep, -1L, drop = FALSE]
+      exogenous_forward <- x_forward[
+        keep, length(endogenous) + seq_len(ncol(exogenous_matrix)), drop = FALSE
+      ]
       colnames(exogenous_forward) <- paste0(colnames(exogenous_matrix), "__fd")
       out <- cbind(out, as.data.frame(exogenous_forward, check.names = FALSE))
     }
@@ -251,9 +263,9 @@ recursive_demeaning_iv <- function(data, id, time, outcome, endogenous,
   dropped_collinear_exogenous <- character()
 
   y <- transformed[[y_name]]
-  x <- cbind(transformed[[x_name]])
+  x <- as.matrix(transformed[x_name])
   colnames(x) <- endogenous
-  z <- cbind(transformed[[z_name]])
+  z <- as.matrix(transformed[z_name])
   colnames(z) <- paste0(endogenous, "__backward_instrument")
   if (length(exogenous_names)) {
     x_exogenous <- as.matrix(transformed[exogenous_names])
@@ -266,25 +278,28 @@ recursive_demeaning_iv <- function(data, id, time, outcome, endogenous,
   # Forward-demeaned factor indicators can contain an exact dependency even
   # after treatment coding. For example, once t = 1 is omitted, the remaining
   # time indicators sum to a within-unit constant whose forward demean is zero.
-  # Preserve the endogenous regressor and its instrument, then add exogenous
+  # Preserve the endogenous regressors and their instruments, then add exogenous
   # columns sequentially only when they increase the rank of both X and Z.
-  if (ncol(x) > 1L) {
-    keep_controls <- logical(ncol(x) - 1L)
-    x_kept <- x[, 1L, drop = FALSE]
-    z_kept <- z[, 1L, drop = FALSE]
-    for (j in 2L:ncol(x)) {
+  n_endogenous <- length(endogenous)
+  if (ncol(x) > n_endogenous) {
+    control_columns <- (n_endogenous + 1L):ncol(x)
+    keep_controls <- logical(length(control_columns))
+    x_kept <- x[, seq_len(n_endogenous), drop = FALSE]
+    z_kept <- z[, seq_len(n_endogenous), drop = FALSE]
+    for (control_index in seq_along(control_columns)) {
+      j <- control_columns[[control_index]]
       x_candidate <- cbind(x_kept, x[, j, drop = FALSE])
       z_candidate <- cbind(z_kept, z[, j, drop = FALSE])
       adds_x_rank <- qr(x_candidate)$rank > qr(x_kept)$rank
       adds_z_rank <- qr(z_candidate)$rank > qr(z_kept)$rank
       if (adds_x_rank && adds_z_rank) {
-        keep_controls[j - 1L] <- TRUE
+        keep_controls[[control_index]] <- TRUE
         x_kept <- x_candidate
         z_kept <- z_candidate
       }
     }
     if (any(!keep_controls)) {
-      dropped_collinear_exogenous <- colnames(x)[-1L][!keep_controls]
+      dropped_collinear_exogenous <- colnames(x)[control_columns][!keep_controls]
       rlang::warn(
         paste0("Dropping transformed exogenous column(s) that are exactly collinear: ",
                paste(dropped_collinear_exogenous, collapse = ", "), "."),
@@ -301,10 +316,14 @@ recursive_demeaning_iv <- function(data, id, time, outcome, endogenous,
   if (qr(z)$rank < ncol(z)) rd_iv_abort("The transformed instrument matrix is rank deficient.")
 
   z_cross <- crossprod(z)
-  first_stage_coefficients <- solve(z_cross, crossprod(z, x[, 1L]))
-  fitted_endogenous <- as.numeric(z %*% first_stage_coefficients)
+  first_stage_coefficients <- solve(
+    z_cross, crossprod(z, x[, seq_len(n_endogenous), drop = FALSE])
+  )
+  colnames(first_stage_coefficients) <- endogenous
+  fitted_endogenous <- z %*% first_stage_coefficients
+  colnames(fitted_endogenous) <- endogenous
   x_hat <- x
-  x_hat[, 1L] <- fitted_endogenous
+  x_hat[, seq_len(n_endogenous)] <- fitted_endogenous
 
   second_stage_cross <- crossprod(x_hat, x)
   if (qr(second_stage_cross)$rank < ncol(x)) {
@@ -326,60 +345,91 @@ recursive_demeaning_iv <- function(data, id, time, outcome, endogenous,
   coefficient_table$t <- coefficient_table$estimate / coefficient_table$std_error
   coefficient_table$p <- 2 * stats::pnorm(-abs(coefficient_table$t))
 
-  first_stage_residuals <- x[, 1L] - fitted_endogenous
-  first_stage_vcov <- rd_iv_vcov(z, first_stage_residuals, cluster_values)
-  instrument_name <- colnames(z)[1L]
-  instrument_estimate <- unname(first_stage_coefficients[1L])
-  instrument_se <- sqrt(first_stage_vcov[instrument_name, instrument_name])
-  instrument_t <- instrument_estimate / instrument_se
-
-  unrestricted_ssr <- sum(first_stage_residuals^2)
-  if (ncol(z) == 1L) {
-    restricted_ssr <- sum(x[, 1L]^2)
-  } else {
-    restricted_z <- z[, -1L, drop = FALSE]
-    restricted_fit <- restricted_z %*%
-      solve(crossprod(restricted_z), crossprod(restricted_z, x[, 1L]))
-    restricted_ssr <- sum((x[, 1L] - restricted_fit)^2)
-  }
+  excluded_names <- colnames(z)[seq_len(n_endogenous)]
+  included_names <- setdiff(colnames(z), excluded_names)
   residual_df <- n - ncol(z)
-  classical_f <- ((restricted_ssr - unrestricted_ssr) / 1) /
-    (unrestricted_ssr / residual_df)
-  partial_r2 <- (restricted_ssr - unrestricted_ssr) / restricted_ssr
-  first_stage <- data.frame(
-    endogenous = endogenous,
-    instrument = instrument_name,
-    estimate = instrument_estimate,
-    std_error = instrument_se,
-    t = instrument_t,
-    f_clustered_wald = instrument_t^2,
-    p_clustered_wald = stats::pchisq(instrument_t^2, df = 1L, lower.tail = FALSE),
-    f_classical = classical_f,
-    partial_r2 = partial_r2,
-    instrument_positive = instrument_estimate > 0,
-    weak_by_f10 = instrument_t^2 < 10,
-    observations = n,
-    stringsAsFactors = FALSE
-  )
-  if (is.finite(first_stage$f_clustered_wald) && first_stage$f_clustered_wald < 10) {
-    rlang::warn(
-      sprintf("The cluster-robust first-stage Wald F-statistic is %.2f; treat the RD-IV estimate as weak-instrument sensitive.",
-              first_stage$f_clustered_wald),
-      class = "rd_iv_weak_first_stage"
+  first_stage_rows <- vector("list", n_endogenous)
+  fund_first_stage_rows <- vector("list", n_endogenous)
+  for (j in seq_len(n_endogenous)) {
+    first_stage_residuals <- x[, j] - fitted_endogenous[, j]
+    first_stage_vcov <- rd_iv_vcov(z, first_stage_residuals, cluster_values)
+    excluded_coefficients <- first_stage_coefficients[excluded_names, j, drop = TRUE]
+    excluded_vcov <- first_stage_vcov[excluded_names, excluded_names, drop = FALSE]
+    wald_chi2 <- as.numeric(
+      crossprod(excluded_coefficients, solve(excluded_vcov, excluded_coefficients))
     )
-  }
+    clustered_f_proxy <- wald_chi2 / n_endogenous
 
-  fund_first_stage <- rd_iv_fund_first_stage(transformed, id, x_name, z_name)
-  valid_fund_slopes <- is.finite(fund_first_stage$slope_no_intercept)
-  first_stage$fund_slopes_available <- sum(valid_fund_slopes)
-  first_stage$fund_slopes_negative <- sum(
-    fund_first_stage$slope_no_intercept[valid_fund_slopes] < 0
-  )
-  first_stage$share_fund_slopes_negative <- if (any(valid_fund_slopes)) {
-    first_stage$fund_slopes_negative / first_stage$fund_slopes_available
-  } else {
-    NA_real_
+    unrestricted_ssr <- sum(first_stage_residuals^2)
+    if (!length(included_names)) {
+      restricted_ssr <- sum(x[, j]^2)
+    } else {
+      restricted_z <- z[, included_names, drop = FALSE]
+      restricted_fit <- restricted_z %*%
+        solve(crossprod(restricted_z), crossprod(restricted_z, x[, j]))
+      restricted_ssr <- sum((x[, j] - restricted_fit)^2)
+    }
+    classical_f <- ((restricted_ssr - unrestricted_ssr) / n_endogenous) /
+      (unrestricted_ssr / residual_df)
+    partial_r2 <- (restricted_ssr - unrestricted_ssr) / restricted_ssr
+
+    own_instrument <- paste0(endogenous[[j]], "__backward_instrument")
+    own_estimate <- unname(first_stage_coefficients[own_instrument, j])
+    own_se <- sqrt(first_stage_vcov[own_instrument, own_instrument])
+    own_t <- own_estimate / own_se
+    first_stage_rows[[j]] <- data.frame(
+      endogenous = endogenous[[j]],
+      instrument = paste(excluded_names, collapse = ";"),
+      estimate = own_estimate,
+      std_error = own_se,
+      t = own_t,
+      wald_chi2_clustered = wald_chi2,
+      excluded_instruments = n_endogenous,
+      f_clustered_wald = clustered_f_proxy,
+      p_clustered_wald = stats::pchisq(
+        wald_chi2, df = n_endogenous, lower.tail = FALSE
+      ),
+      f_classical = classical_f,
+      partial_r2 = partial_r2,
+      instrument_positive = own_estimate > 0,
+      weak_by_f10 = clustered_f_proxy < 10,
+      observations = n,
+      stringsAsFactors = FALSE
+    )
+
+    fund_first_stage_rows[[j]] <- rd_iv_fund_first_stage(
+      transformed, id, x_name[[j]], z_name[[j]]
+    )
+    fund_first_stage_rows[[j]]$endogenous <- endogenous[[j]]
+    valid_fund_slopes <- is.finite(
+      fund_first_stage_rows[[j]]$slope_no_intercept
+    )
+    first_stage_rows[[j]]$fund_slopes_available <- sum(valid_fund_slopes)
+    first_stage_rows[[j]]$fund_slopes_negative <- sum(
+      fund_first_stage_rows[[j]]$slope_no_intercept[valid_fund_slopes] < 0
+    )
+    first_stage_rows[[j]]$share_fund_slopes_negative <-
+      if (any(valid_fund_slopes)) {
+        first_stage_rows[[j]]$fund_slopes_negative /
+          first_stage_rows[[j]]$fund_slopes_available
+      } else {
+        NA_real_
+      }
+    if (is.finite(clustered_f_proxy) && clustered_f_proxy < 10) {
+      rlang::warn(
+        sprintf(
+          paste0("The cluster-robust first-stage Wald F proxy for `%s` is %.2f; ",
+                 "treat the RD-IV estimate as weak-instrument sensitive."),
+          endogenous[[j]], clustered_f_proxy
+        ),
+        class = "rd_iv_weak_first_stage"
+      )
+    }
   }
+  first_stage <- do.call(rbind, first_stage_rows)
+  fund_first_stage <- do.call(rbind, fund_first_stage_rows)
+  rownames(first_stage) <- NULL
+  rownames(fund_first_stage) <- NULL
   id_lengths <- lengths(id_rows)
   diagnostics <- data.frame(
     input_rows = nrow(data),
@@ -391,7 +441,7 @@ recursive_demeaning_iv <- function(data, id, time, outcome, endogenous,
     maximum_periods = max(id_lengths),
     unbalanced_panel = length(unique(id_lengths)) > 1L,
     input_was_sorted = input_was_sorted,
-    endogenous = endogenous,
+    endogenous = paste(endogenous, collapse = ";"),
     outcome = outcome,
     exogenous_columns = paste(sub("__fd$", "", exogenous_names), collapse = ";"),
     dropped_collinear_exogenous = paste(dropped_collinear_exogenous, collapse = ";"),

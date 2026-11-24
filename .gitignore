@@ -53,3 +53,6 @@
 # Operating-system files
 .DS_Store
 Thumbs.db
+
+# Logs written by R/pipeline during reruns
+/logs/

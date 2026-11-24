@@ -178,7 +178,7 @@ testthat::test_that("fund-level first-stage diagnostics are complete", {
   testthat::expect_named(
     fit$fund_first_stage,
     c("id", "observations", "slope_no_intercept",
-      "intercept_with_intercept", "slope_with_intercept")
+      "intercept_with_intercept", "slope_with_intercept", "endogenous")
   )
   testthat::expect_true(all(is.finite(fit$first_stage$f_clustered_wald)))
   testthat::expect_true(all(is.finite(fit$first_stage$partial_r2)))
@@ -203,4 +203,51 @@ testthat::test_that("redundant transformed factor controls are dropped explicitl
                          ncol(fit$design$regressors))
   testthat::expect_equal(qr(fit$design$instruments)$rank,
                          ncol(fit$design$instruments))
+})
+
+testthat::test_that("multiple endogenous regressors are projected jointly", {
+  panel <- make_rd_panel()
+  panel$flow <- c(2, 1, 4, 3, 1, 5, 2, 6, 4, 2, 7, 1)
+  panel$return <- panel$fund_effect + 2 * panel$size - 3 * panel$flow +
+    0.5 * panel$control
+
+  fit <- suppressWarnings(
+    suppress_weak_first_stage(
+      recursive_demeaning_iv(
+        panel, id = "fund", time = "period", outcome = "return",
+        endogenous = c("size", "flow"), exogenous = "control",
+        cluster = c("fund", "cluster_time")
+      )
+    )
+  )
+
+  estimates <- stats::setNames(fit$coefficients$estimate, fit$coefficients$term)
+  testthat::expect_equal(unname(estimates[["size"]]), 2, tolerance = 1e-10)
+  testthat::expect_equal(unname(estimates[["flow"]]), -3, tolerance = 1e-10)
+  testthat::expect_equal(unname(estimates[["control"]]), 0.5, tolerance = 1e-10)
+  testthat::expect_setequal(fit$first_stage$endogenous, c("size", "flow"))
+  testthat::expect_equal(ncol(fit$design$projected_regressors),
+                         ncol(fit$design$regressors))
+  testthat::expect_true(all(c("size__backward_instrument",
+                              "flow__backward_instrument") %in%
+                            colnames(fit$design$instruments)))
+
+  z <- fit$design$instruments
+  x <- fit$design$regressors
+  x_hat <- fit$design$projected_regressors
+  for (endogenous_index in seq_len(2L)) {
+    first_stage_lm <- stats::lm.fit(x = z, y = x[, endogenous_index])
+    testthat::expect_equal(
+      unname(x_hat[, endogenous_index]),
+      unname(first_stage_lm$fitted.values),
+      tolerance = 1e-10
+    )
+  }
+  # Because fitted values are projections onto Z, Xhat'X and Xhat'Xhat are
+  # numerically identical. The former is the 2SLS moment-equation notation;
+  # neither expression substitutes the original endogenous variables for their
+  # first-stage fitted values on the instrument side of the normal equations.
+  testthat::expect_equal(
+    base::crossprod(x_hat, x), base::crossprod(x_hat), tolerance = 1e-10
+  )
 })

@@ -1,0 +1,25 @@
+\begin{figure}[htbp]
+\centering
+\captionsetup{
+  justification=raggedright,
+  labelsep=none,
+  singlelinecheck=false,
+  labelformat=boldlabel,
+}
+\caption[Net feature importance by theme over time across ML models.]{\footnotesize \textbf{: Net feature importance by theme over time across ML models.} Signed surrogate loadings aggregated by characteristic theme at each refit. Loadings are normalized by each model's total gross loading. Colour records the direction and relative magnitude of the theme contribution.}
+\includegraphics[width=\linewidth]{figures/feature_importance_heatmap.png}
+\label{fig:fi_heatmap}
+\end{figure}
+
+\begin{figure}[htbp]
+\centering
+\captionsetup{
+  justification=raggedright,
+  labelsep=none,
+  singlelinecheck=false,
+  labelformat=boldlabel,
+}
+\caption[Gross feature importance by theme over time across ML models.]{\footnotesize \textbf{: Gross feature importance by theme over time across ML models.} Absolute surrogate loadings aggregated by characteristic theme at each refit. Theme shares sum to one within each model and refit and therefore show where coefficient mass is concentrated without allowing signs to cancel.}
+\includegraphics[width=\linewidth]{figures/feature_importance_heatmap_gross.png}
+\label{fig:fi_heatmap_gross}
+\end{figure}

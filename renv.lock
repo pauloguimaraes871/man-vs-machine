@@ -5,6 +5,14 @@
       {
         "Name": "CRAN",
         "URL": "https://packagemanager.posit.co/cran/2026-07-20"
+      },
+      {
+        "Name": "PPM20260110",
+        "URL": "https://packagemanager.posit.co/cran/2026-01-10"
+      },
+      {
+        "Name": "PPM20250601",
+        "URL": "https://packagemanager.posit.co/cran/2025-06-01"
       }
     ]
   },
@@ -517,6 +525,12 @@
       "Author": "Winston Chang [aut, cre], Posit Software, PBC [cph, fnd]",
       "Maintainer": "Winston Chang <winston@posit.co>",
       "Repository": "CRAN"
+    },
+    "RApiSerialize": {
+      "Package": "RApiSerialize",
+      "Version": "0.1.4",
+      "Source": "Repository",
+      "Repository": "PPM20260110"
     },
     "RColorBrewer": {
       "Package": "RColorBrewer",
@@ -2545,7 +2559,7 @@
       "Package": "factoRverse",
       "Version": "0.7.0",
       "Source": "Local",
-      "Path": "C:/Users/paulo.fonteles/OneDrive - Sicoob/Documentos/Doutorado/Man vs Machine/factoRverse/v.0.7.0/factoRverse_0.7.0.tar.gz"
+      "Path": "./factoRverse/v.0.7.0/factoRverse_0.7.0.tar.gz"
     },
     "fansi": {
       "Package": "fansi",
@@ -6093,6 +6107,12 @@
       "Maintainer": "Hadley Wickham <hadley@posit.co>",
       "Repository": "CRAN"
     },
+    "qs": {
+      "Package": "qs",
+      "Version": "0.27.3",
+      "Source": "Repository",
+      "Repository": "PPM20260110"
+    },
     "quadprog": {
       "Package": "quadprog",
       "Version": "1.5-8",
@@ -7095,6 +7115,12 @@
       "Repository": "RSPM",
       "Encoding": "UTF-8"
     },
+    "slider": {
+      "Package": "slider",
+      "Version": "0.3.2",
+      "Source": "Repository",
+      "Repository": "PPM20250601"
+    },
     "snakecase": {
       "Package": "snakecase",
       "Version": "0.11.1",
@@ -7166,6 +7192,12 @@
       "Author": "Emil Hvitfeldt [aut, cre] (<https://orcid.org/0000-0002-0679-1945>), Davis Vaughan [ctb], Posit Software, PBC [cph, fnd]",
       "Maintainer": "Emil Hvitfeldt <emil.hvitfeldt@posit.co>",
       "Repository": "CRAN"
+    },
+    "stringfish": {
+      "Package": "stringfish",
+      "Version": "0.17.0",
+      "Source": "Repository",
+      "Repository": "PPM20260110"
     },
     "stringi": {
       "Package": "stringi",
@@ -8190,6 +8222,12 @@
       "NeedsCompilation": "no",
       "Author": "Hadley Wickham [aut, cre], Posit Software, PBC [cph, fnd]",
       "Maintainer": "Hadley Wickham <hadley@posit.co>",
+      "Repository": "CRAN"
+    },
+    "warp": {
+      "Package": "warp",
+      "Version": "0.2.3",
+      "Source": "Repository",
       "Repository": "CRAN"
     },
     "whisker": {
