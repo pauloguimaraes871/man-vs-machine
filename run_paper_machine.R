@@ -1,7 +1,9 @@
 # run_paper_machine.R ---------------------------------------------------------
 #
-# Rebuilds the paper's "machine" from the latest PRODUCTION manifest of the
-# Multifatorial 3.0 pipeline, under academic (not deployment) settings.
+# Rebuilds the paper's "machine" from the July 2026 PRODUCTION manifest of the
+# Multifatorial 3.0 pipeline, under academic (not deployment) settings. It is
+# self-contained: the pipeline code it uses is in R/pipeline/ and its inputs are
+# in data/inputs/machine_2026_07/. The pipeline repo is not needed.
 #
 # Relation to the pipeline repo
 # -----------------------------
@@ -33,8 +35,8 @@
 #       switched off entirely: no inverse-idio-vol tilt and no benchmark-
 #       proximity tilt, so the machine's score is the model's prediction.
 #
-# This script WRITES NOTHING into the pipeline repo or its pins board. It reads
-# the manifest, and all outputs land under data/derived/machine_run/ here.
+# This script never reads or writes the pipeline repo or its pins board. All
+# outputs land under data/derived/machine_run/ here.
 #
 # Usage
 # -----
@@ -46,10 +48,10 @@
 #
 # ---- 1. CONFIG --------------------------------------------------------------
 
-PIPELINE_DIR <- file.path(
-  Sys.getenv("USERPROFILE"),
-  "OneDrive - Sicoob", "Renda Variável", "Multifatorial 3.0", "pipeline"
-)
+HELPERS_DIR     <- here::here("R", "pipeline")
+INPUTS_DIR      <- here::here("data", "inputs", "machine_2026_07")
+PIPELINE_COMMIT <- "8739bb0bce966dad8f7c701f0c7413a6fa25f61f"  # origin of R/pipeline/
+FACTORVERSE_PIN <- "0.7.0"
 
 # PINNED, not NULL. `NULL` resolves to the latest dated manifest in the
 # pipeline's board, which silently changes underneath a partially cached run:
@@ -68,17 +70,16 @@ MANIFEST_NAME <- "manifest_2026_07.qs"
 # Python backend -------------------------------------------------------------
 # factoRverse's fit_keras_model() is written against the Keras 2 API, and the
 # renv lock pins R keras 2.15.0 to match. But renv does NOT manage the Python
-# side. The pipeline pins its interpreter in pipeline/.Renviron -- a file R reads
-# only when it starts in the pipeline directory. Running from here that never
-# loads, so reticulate falls back to its default virtualenv, which on this machine
-# carries Keras 3 and fails with:
+# side. Name the interpreter in this project's .Renviron (not tracked):
+#   RETICULATE_PYTHON=<path to python.exe>
+# Without it reticulate falls back to its default virtualenv, which may carry
+# Keras 3 and fail with:
 #   ValueError: Only input tensors may be passed as positional arguments
 # (surfacing confusingly as "objeto 'fit_nn' nao encontrado", because
 # fit_keras_model()'s tryCatch swallows the real error and then returns a variable
 # it never assigned).
 #
-# Read the interpreter out of the pipeline's own .Renviron rather than hardcoding
-# it, so the two stay in sync. Set to a path to override.
+# See environment/README.md. Set to a path to override.
 RETICULATE_PYTHON_OVERRIDE <- NULL
 
 # Stop after this stage. Use "screen" or "probe" for a cheap validation pass
@@ -175,10 +176,13 @@ SB_CONFIGS <- .ARM_CONFIGS[[.paper_arm]]
 # unaffected, which is the channel being tested, but the arm is not a pure
 # pinball run and the paper should not claim it is.
 #
-# OLS is untuned and has no tuning_strategy. On the rmse and mpe arms it is
-# therefore bit-identical and serves as a free control: if the OLS portfolio
-# moves between those two arms, that is a plumbing bug, not a finding. It is NOT
-# a control on the mphe arm, where its objective changes with everything else.
+# OLS is untuned and has no tuning_strategy, and class validity forbids ols
+# configs from carrying any custom_objective other than the "squared_error"
+# default at all ("Custom objectives are only allowed for 'sw', 'rp', 'hrp',
+# 'mvo', 'mmaf', 'xgb' or 'nn' algorithms" -- confirmed by validObject()
+# rejecting an attempted ols/pseudo_huber_error assignment outright). So OLS is
+# bit-identical, and a free control, across ALL THREE arms including mphe: if
+# the OLS portfolio moves at all, that is a plumbing bug, not a finding.
 #
 # quantile_tau feeds `mpe` only; huber_delta feeds `mphe` at both the metric and
 # the Keras loss. Both are set on every arm so the config carries the value that
@@ -430,26 +434,49 @@ PARALLEL_MVO <- FALSE
 
 OUT_DIR <- here::here("data", "derived", "machine_run")
 
+# (e) Named reruns -- see runs/README.md. With PAPER_RUN unset nothing below
+# changes anything. With PAPER_RUN = "<name>", runs/<name>.R is applied on top of
+# the settings above, outputs and checkpoints go to data/runs/<name>/, and
+# BASE_DIR (the submitted results) is only ever read.
+BASE_DIR       <- OUT_DIR
+CHECKPOINT_DIR <- here::here("data", "checkpoints")
+RUN_NAME       <- Sys.getenv("PAPER_RUN", "")
+RUN_FILE       <- NULL
+RERUN_FROM     <- NULL  # first stage to recompute; earlier ones come from BASE_DIR
+RERUN_LEARNERS <- NULL  # at "sb": learners to refit; the others come from BASE_DIR
+
+if (nzchar(RUN_NAME)) {
+  if (!grepl("^[A-Za-z0-9_-]+$", RUN_NAME)) {
+    stop("PAPER_RUN may contain only letters, digits, '_' and '-'.")
+  }
+  RUN_FILE <- here::here("runs", paste0(RUN_NAME, ".R"))
+  source(RUN_FILE, local = TRUE, encoding = "UTF-8")
+  OUT_DIR        <- here::here("data", "runs", RUN_NAME)
+  CHECKPOINT_DIR <- file.path(OUT_DIR, "checkpoints")
+}
+options(mvm.checkpoint_root = CHECKPOINT_DIR)
+
 
 # ---- 2. ENVIRONMENT ---------------------------------------------------------
 
-stopifnot(dir.exists(PIPELINE_DIR))
+stopifnot(dir.exists(HELPERS_DIR), dir.exists(INPUTS_DIR))
 
 # Bind the Python backend BEFORE anything can initialise it. reticulate binds on
 # first use and cannot rebind within a session, so this must precede library()
 # calls and any tf$/keras call.
-.pipeline_python <- function() {
-  f <- file.path(PIPELINE_DIR, ".Renviron")
-  if (!file.exists(f)) return(NA_character_)
+.project_python <- function() {
+  f <- here::here(".Renviron")
+  from_env <- Sys.getenv("RETICULATE_PYTHON", NA_character_)
+  if (!file.exists(f)) return(from_env)
   ln <- grep("^\\s*RETICULATE_PYTHON\\s*=", readLines(f, warn = FALSE), value = TRUE)
-  if (length(ln) == 0) return(NA_character_)
+  if (length(ln) == 0) return(from_env)
   trimws(sub("^\\s*RETICULATE_PYTHON\\s*=", "", ln[1]))
 }
 
 .py <- if (!is.null(RETICULATE_PYTHON_OVERRIDE)) {
   RETICULATE_PYTHON_OVERRIDE
 } else {
-  .pipeline_python()
+  .project_python()
 }
 
 if (!is.na(.py) && nzchar(.py) && file.exists(.py)) {
@@ -466,10 +493,10 @@ if (!is.na(.py) && nzchar(.py) && file.exists(.py)) {
     }
   } else {
     Sys.setenv(RETICULATE_PYTHON = .py)
-    message("RETICULATE_PYTHON <- ", .py, "  (from pipeline/.Renviron)")
+    message("RETICULATE_PYTHON <- ", .py)
   }
 } else {
-  warning("Could not resolve the pipeline's Python interpreter. Neural-network ",
+  warning("Could not resolve the project's Python interpreter. Neural-network ",
           "stages will use reticulate's default environment, which may carry ",
           "Keras 3 and is incompatible with factoRverse's Keras 2 code.")
 }
@@ -487,11 +514,9 @@ if (utils::packageVersion("factoRverse") < "0.7.0") {
        "BAYES_CONSTANTS <- NULL to run it against an older build.")
 }
 
-# Source the pipeline's helper layer only. R/deploy and R/tests are deliberately
-# NOT sourced: they pin to the production board and run deploy-time suites.
+# The pipeline functions this paper uses, copied into this repo at PIPELINE_COMMIT.
 invisible(lapply(
-  list.files(file.path(PIPELINE_DIR, "R", "helpers"), pattern = "\\.R$",
-             full.names = TRUE),
+  list.files(HELPERS_DIR, pattern = "\\.R$", full.names = TRUE),
   source
 ))
 
@@ -499,6 +524,17 @@ invisible(lapply(
 
 STAGES <- c("screen", "probe", "ss", "sb", "mb", "meta", "learners")
 stopifnot(STOP_AFTER %in% STAGES)
+if (nzchar(RUN_NAME)) {
+  if (length(RERUN_FROM) != 1L || !RERUN_FROM %in% STAGES) {
+    stop("runs/", RUN_NAME, ".R must set RERUN_FROM to one of: ",
+         paste(STAGES, collapse = ", "))
+  }
+  if (!is.null(RERUN_LEARNERS) &&
+      (!identical(RERUN_FROM, "sb") || !all(RERUN_LEARNERS %in% SB_CONFIGS))) {
+    stop("RERUN_LEARNERS needs RERUN_FROM = 'sb' and names taken from SB_CONFIGS: ",
+         paste(SB_CONFIGS, collapse = ", "))
+  }
+}
 
 
 # ---- 2b. BAYESIAN-OPTIMIZATION BUDGET ---------------------------------------
@@ -666,9 +702,16 @@ patch_sb_configs <- function(cfgs, training_sample_size = NULL,
       }
       # On the mpe arm this is a no-op (objective stays "squared_error") and the
       # arm isolates selection. On the mphe arm it changes the TRAINING loss for
-      # xgb and nn1-nn3; translate_metrics() returns NULL for ols/glmnet/rf, so
-      # those three are unaffected by this line and move through selection only.
-      if (!identical(cfg@custom_objective, EVAL_OBJECTIVE)) {
+      # xgb and nn1-nn3 only. This is gated on sb_algorithm, not just left to
+      # translate_metrics() returning NULL for ols/glmnet/rf: class validity
+      # forbids those three from carrying ANY non-default custom_objective at
+      # all ("Custom objectives are only allowed for 'sw', 'rp', 'hrp', 'mvo',
+      # 'mmaf', 'xgb' or 'nn' algorithms") -- assigning "pseudo_huber_error" to
+      # an ols/glmnet/rf config fails validObject(), it doesn't silently no-op.
+      # So ols/glmnet/rf move through selection only, exactly as intended, but
+      # by never touching the slot rather than by the translation being inert.
+      if (cfg@sb_algorithm %in% c("xgb", "nn") &&
+          !identical(cfg@custom_objective, EVAL_OBJECTIVE)) {
         message(sprintf("  %-13s custom_objective: %s -> %s",
                         nm, cfg@custom_objective, EVAL_OBJECTIVE))
         cfg@custom_objective <- EVAL_OBJECTIVE
@@ -879,8 +922,7 @@ git_hash_of <- function(dir) {
 # Checked here against the pipeline SOURCE rather than a branch name, so this
 # stays correct wherever the fix lives. Costs about a second.
 local({
-  reg_file <- file.path(PIPELINE_DIR, "R", "helpers",
-                        "backtest_base_signal_blending.R")
+  reg_file <- file.path(HELPERS_DIR, "backtest_base_signal_blending.R")
   if (!file.exists(reg_file)) {
     warning("Pipeline backtest helper not found; dispatch pre-flight skipped.")
     return(invisible(NULL))
@@ -899,40 +941,25 @@ local({
   missing <- setdiff(SB_CONFIGS, registered)
   if (length(missing) > 0L) {
     stop("The pipeline cannot dispatch: ", paste(missing, collapse = ", "),
-         "\n  pipeline : ", PIPELINE_DIR,
-         "\n  at commit: ", git_hash_of(PIPELINE_DIR),
+         "\n  registry : ", reg_file,
          "\n  These configs would be built, silently skipped, and the run would",
          " fail only after every other model had been fitted.",
-         "\n  The nn*_grid registry entries live in commit 712b7bd",
-         " (merged to pipeline main on 2026-08-12).", call. = FALSE)
+         "\n  Add each one to `sb_registry` in that file.", call. = FALSE)
   }
   message(sprintf("Pipeline dispatch OK: %d/%d configs registered (%s @ %s)",
                   length(SB_CONFIGS), length(SB_CONFIGS),
-                  basename(PIPELINE_DIR), git_hash_of(PIPELINE_DIR)))
+                  "R/pipeline", substr(PIPELINE_COMMIT, 1, 7)))
 })
 
-# The manifest records pin locations as paths RELATIVE to the pipeline root
+# The manifest records pin locations as RELATIVE paths
 # (versions_table$latest_version = "data/prod/<pin>/<version>", and
-# manifest$board$path = "data/prod"), so load_old_object()'s qs::qread() only
-# resolves when the working directory IS the pipeline root. Running from Man vs
-# Machine, every load must therefore be wrapped. Read-only; the directory is
-# always restored, including on error.
+# manifest$board$path = "data/prod"). INPUTS_DIR mirrors that layout, so every
+# load runs from there. Read-only; the directory is always restored, including
+# on error.
 load_pipeline_object <- function(manifest, object_name) {
-  old_wd <- setwd(PIPELINE_DIR)
+  old_wd <- setwd(INPUTS_DIR)
   on.exit(setwd(old_wd), add = TRUE)
   load_old_object(manifest, object_name)
-}
-
-# Newest factoRverse tarball vendored by the pipeline = the version production
-# actually runs. This is the real parity check; see the note on the manifest's
-# own semver field in section 3.
-pipeline_factoRverse_version <- function() {
-  dirs <- list.dirs(file.path(PIPELINE_DIR, "factoRverse"), recursive = FALSE,
-                    full.names = FALSE)
-  v <- sub("^v\\.?", "", dirs)
-  v <- v[grepl("^[0-9]+(\\.[0-9]+)+$", v)]
-  if (length(v) == 0) return(NA_character_)
-  as.character(max(numeric_version(v)))
 }
 
 
@@ -1060,12 +1087,23 @@ main <- function() {
       if (as.integer(sub("[.].*$", "", kv)) != 2L) {
         stop("Python Keras ", kv, " is bound, but factoRverse's fit_keras_model() ",
              "requires the Keras 2 API. Point RETICULATE_PYTHON at an interpreter ",
-             "with keras 2.x (the pipeline's .Renviron names one) and restart R.")
+             "with keras 2.x (see environment/README.md) and restart R.")
       }
     }
   }
 
   dir.create(OUT_DIR, recursive = TRUE, showWarnings = FALSE)
+
+  # A run's cached stages are valid only for the run file that produced them.
+  if (nzchar(RUN_NAME)) {
+    saved <- file.path(OUT_DIR, "run.R")
+    if (!file.exists(saved)) {
+      file.copy(RUN_FILE, saved)
+    } else if (!identical(readLines(saved), readLines(RUN_FILE))) {
+      stop("runs/", RUN_NAME, ".R changed after this run started. Give the new ",
+           "specification a new name, so cached stages are not mixed.")
+    }
+  }
 
   # The grid and BO arms must not share cache files. screen/probe/ss are
   # tuning-independent and shared; sb/mb/meta are arm-specific and would otherwise
@@ -1103,6 +1141,11 @@ main <- function() {
       message("[skip] ", name, " -- reading ", path)
       return(qs::qread(path))
     }
+    if (nzchar(RUN_NAME) && match(name, STAGES) < match(RERUN_FROM, STAGES)) {
+      submitted <- file.path(BASE_DIR, basename(path))
+      message("[reuse] ", name, " -- reading ", submitted)
+      return(qs::qread(submitted))
+    }
     message("\n==== stage: ", name, " ====")
     out <- force(expr)
     qs::qsave(out, path)
@@ -1120,7 +1163,7 @@ main <- function() {
   # ---- 3. LOAD THE MANIFEST AND GOLD OBJECTS --------------------------------
 
   manifest_path <- get_latest_manifest_path(
-    manifests_dir = file.path(PIPELINE_DIR, "data", "prod", "manifests"),
+    manifests_dir = file.path(INPUTS_DIR, "data", "prod", "manifests"),
     manifest_name = MANIFEST_NAME
   )
   manifest <- qs::qread(manifest_path)
@@ -1136,17 +1179,16 @@ main <- function() {
   # Do NOT trust manifest$factoRverse_semver. `_targets_update.R:367` passes the
   # previous manifest's value straight through instead of recomputing it, so the
   # field has been frozen at "0.3" since the initial run and every manifest on
-  # disk repeats it. The meaningful comparison is against the newest tarball the
-  # pipeline vendors, which is the version production installs.
+  # disk repeats it. The meaningful comparison is against the version that
+  # produced the paper's results, vendored in factoRverse/.
   installed <- as.character(utils::packageVersion("factoRverse"))
-  vendored  <- pipeline_factoRverse_version()
-  message("  factoRverse      : installed ", installed, " | pipeline vendors ",
-          vendored, " | manifest field ",
+  message("  factoRverse      : installed ", installed, " | paper used ",
+          FACTORVERSE_PIN, " | manifest field ",
           paste(manifest$factoRverse_semver, collapse = "."), " (stale, ignored)")
-  if (!is.na(vendored) && !identical(installed, vendored)) {
-    warning("factoRverse mismatch -- pipeline vendors ", vendored,
+  if (!identical(installed, FACTORVERSE_PIN)) {
+    warning("factoRverse mismatch -- the paper used ", FACTORVERSE_PIN,
             ", this session has ", installed,
-            ". Results may not be comparable to production.")
+            ". Results may not be comparable to the submitted ones.")
   }
 
   gold_results        <- load_pipeline_object(manifest, "gold_results")
@@ -1478,7 +1520,7 @@ main <- function() {
   # left over from a run with a DIFFERENT ML_TARGET would silently be reused, giving
   # an ensemble whose members were trained on two different targets. Refuse to start
   # in that case rather than produce a quietly incoherent result.
-  .sb_ckpt <- file.path(here::here("data", "checkpoints"),
+  .sb_ckpt <- file.path(CHECKPOINT_DIR,
                         "backtest_base_signal_blending_checkpoint",
                         paste0("backtest_base_signal_blending_checkpoint_",
                                gold_signals_m_df@current_date, ".qs"))
@@ -1545,6 +1587,7 @@ main <- function() {
       clusters    = ss$ss_backtest_results_lists$freq_ss_backtest_results_lists$clusters[[SS_CONFIG]]
     )
 
+    to_fit <- RERUN_LEARNERS %||% SB_CONFIGS
     base <- backtest_base_signal_blending(
       gold_signals_m_df               = gold_signals_m_df,
       gold_clusters_m_df              = screen$gold_clusters_m_df,
@@ -1556,7 +1599,7 @@ main <- function() {
         returns_clusters_m_xts    = ss$returns_clusters_m_xts,
         ret_indexes_m_xts         = ss$ret_indexes_m_xts
       ),
-      chosen_sb_configs               = SB_CONFIGS,
+      chosen_sb_configs               = to_fit,
       winner_dataset                  = SB_DATASET,
       validation_sample_size          = SB_VALIDATION_SAMPLE_SIZE,
       source                          = manifest$source,
@@ -1570,12 +1613,12 @@ main <- function() {
     base_config_names <- stringr::str_remove(
       names(base_results), "_backtest_results_list$"
     )
-    missing_base_configs <- setdiff(SB_CONFIGS, base_config_names)
+    missing_base_configs <- setdiff(to_fit, base_config_names)
     if (length(missing_base_configs) > 0L) {
       stop("Checkpoint is missing required ", ARM, " base learner(s): ",
            paste(missing_base_configs, collapse = ", "))
     }
-    base_results <- base_results[base_config_names %in% SB_CONFIGS]
+    base_results <- base_results[base_config_names %in% to_fit]
 
     # Assertion 1: no selected model was trained on anything but ind_signals.
     trained_on <- unique(unlist(lapply(base_results, names)))
@@ -1594,6 +1637,20 @@ main <- function() {
       stats::setNames(list(obj),
                       paste0(clean, "_", SB_DATASET, "_backtest_results"))
     }) %>% purrr::flatten()
+
+    # Partial rerun: substitute the refitted learners into the submitted set,
+    # keeping its order. `base` then holds the refitted learners only.
+    if (!is.null(RERUN_LEARNERS)) {
+      submitted <- qs::qread(file.path(BASE_DIR, basename(stage_path("sb"))))$elected
+      wanted <- paste0(SB_CONFIGS, "_", SB_DATASET, "_backtest_results")
+      submitted <- submitted[names(submitted) %in% wanted]
+      submitted[names(elected)] <- elected
+      elected <- submitted
+      if (!setequal(names(elected), wanted)) {
+        stop("No result, refitted or submitted, for: ",
+             paste(setdiff(wanted, names(elected)), collapse = ", "))
+      }
+    }
 
     if (length(elected) != length(SB_CONFIGS)) {
       stop("Expected ", length(SB_CONFIGS), " base learners, got ", length(elected),
@@ -2062,7 +2119,7 @@ main <- function() {
     manifest               = basename(manifest_path),
     manifest_git_hash      = manifest$git_hash,
     manifest_factoRverse   = manifest$factoRverse_semver,
-    pipeline_git_hash      = git_hash_of(PIPELINE_DIR),
+    pipeline_git_hash      = PIPELINE_COMMIT,
     paper_git_hash         = git_hash_of(here::here()),
     excluded_clusters      = EXCLUDED_CLUSTERS,
     excluded_signals       = screen$excluded_signals,
@@ -2070,6 +2127,9 @@ main <- function() {
     ss_config              = SS_CONFIG,
     ss_initial_sample_size = ss_initial_sample_size,
     bh_probe_grid          = probe$grid,
+    run_name               = RUN_NAME,
+    rerun_from             = RERUN_FROM,
+    rerun_learners         = RERUN_LEARNERS,
     sb_configs             = SB_CONFIGS,
     sb_dataset             = SB_DATASET,
     tuning_arm             = ARM,
